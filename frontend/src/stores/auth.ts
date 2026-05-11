@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = ref(false)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const checked = ref(false) // tracks if we already called /api/me
 
   // Request OTP — sends email to Go backend
   async function requestOTP(email: string) {
@@ -71,6 +72,8 @@ export const useAuthStore = defineStore('auth', () => {
     } catch {
       isAuthenticated.value = false
       userID.value = null
+    } finally {
+      checked.value = true // mark as checked regardless of result
     }
   }
 
@@ -89,6 +92,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isLoading,
     error,
+    checked,
     requestOTP,
     verifyOTP,
     connectWallet,

@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 
-	resendClient "NFT_Minting_Platform/pkg/resend"
+	"NFT_Minting_Platform/pkg/email"
 )
 
 // Handler holds the auth service
@@ -36,7 +36,7 @@ func (h *Handler) RegisterRoutes(router *gin.Engine) {
 // RequestOTP godoc
 // POST /auth/request-otp
 // Body: { "email": "user@example.com" }
-// Generates a 6-digit OTP and sends it via Resend
+// Generates a 6-digit OTP and sends it via Email
 func (h *Handler) RequestOTP(c *gin.Context) {
 	var body struct {
 		Email string `json:"email" binding:"required,email"`
@@ -54,8 +54,8 @@ func (h *Handler) RequestOTP(c *gin.Context) {
 		return
 	}
 
-	// Send OTP via Resend
-	if err := resendClient.SendOTP(body.Email, code); err != nil {
+	// Send OTP via MAIL
+	if err := email.SendOTP(body.Email, code); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send OTP email"})
 		return
 	}

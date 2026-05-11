@@ -11,10 +11,14 @@ const api = axios.create({
 })
 
 // Response interceptor — if 401, redirect to login
+// BUT only if not already on the auth page
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (
+      error.response?.status === 401 &&
+      !window.location.pathname.includes('/auth')
+    ) {
       window.location.href = '/auth'
     }
     return Promise.reject(error)

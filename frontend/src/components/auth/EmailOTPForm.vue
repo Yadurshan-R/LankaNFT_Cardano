@@ -12,6 +12,7 @@
           type="email"
           placeholder="you@example.com"
           :error="auth.error ?? undefined"
+          @keyup.enter="handleRequestOTP"
         />
 
         <BaseButton
@@ -38,6 +39,7 @@
           type="text"
           placeholder="000000"
           :error="auth.error ?? undefined"
+          @keyup.enter="handleVerifyOTP"
         />
 
         <BaseButton

@@ -23,7 +23,8 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
-  if (!auth.isAuthenticated) {
+  // Only check auth once — if already determined, skip the API call
+  if (!auth.isAuthenticated && !auth.checked) {
     await auth.checkAuth()
   }
 

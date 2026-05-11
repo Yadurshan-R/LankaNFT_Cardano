@@ -8,6 +8,7 @@
       :disabled="disabled"
       class="input-field"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+      @keyup="$emit('keyup', $event)"
     />
     <span v-if="error" class="input-error">{{ error }}</span>
   </div>
@@ -23,7 +24,7 @@ defineProps<{
   disabled?: boolean
 }>()
 
-defineEmits(['update:modelValue'])
+defineEmits(['update:modelValue', 'keyup'])
 </script>
 
 <style scoped>
