@@ -1,0 +1,102 @@
+{
+  "preamble": {
+    "title": "yadurshan/midnight-nft",
+    "description": "Aiken contracts for project 'yadurshan/midnight-nft'",
+    "version": "0.0.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.19+e525483"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "minting_policy.cip68_mint.mint",
+      "redeemer": {
+        "title": "redeemer",
+        "schema": {
+          "$ref": "#/definitions/minting_policy~1MintRedeemer"
+        }
+      },
+      "parameters": [
+        {
+          "title": "utxo_ref",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        }
+      ],
+      "compiledCode": "590212010100229800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cdc3a400130080024888966002600460106ea800e266446644b30013006001899192cc004c04c00a0091640406eb8c044004c034dd50044566002600600315980098069baa00880145900e45900b2016132332259800980398069baa009899912cc004c8cc004004dd6180a003112cc00400629422b30013375e602a60246ea8c0540040622946266004004602c00280810134566002600d3001004803ccdc524504000643b0000024005130069800802401e66e29220104001bc28000002400514a08072294100e1bae3011300e37540124446466446600400400244b3001001801c4c8c96600266e440180062b30013371e00c0031375a602c0050054051133004004301a00340506eb8c050004c05c005015198028020018a4001132330010013233001001330030040072259800800c52f5c113301330113014001330020023015001404844b30010018a518acc004cdc41bad301300148002266004004602800314a0807101120183756601e60206020602060200024464646600200200844b3001001801c4c8c96600266e440180062b30013371e00c0031375660260050054045133004004301700340446eb8c044004c0500050120a5eb7bdb180c02cdd500198051baa006375c601860126ea800cdc3a400516401c300800130033754011149a26cac8009",
+      "hash": "fa4307493638668d1beccc80b38283e2cad2c94f3836e93d7b215f35"
+    },
+    {
+      "title": "minting_policy.cip68_mint.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "parameters": [
+        {
+          "title": "utxo_ref",
+          "schema": {
+            "$ref": "#/definitions/cardano~1transaction~1OutputReference"
+          }
+        }
+      ],
+      "compiledCode": "590212010100229800aba2aba1aba0aab9faab9eaab9dab9a488888896600264653001300800198041804800cdc3a400130080024888966002600460106ea800e266446644b30013006001899192cc004c04c00a0091640406eb8c044004c034dd50044566002600600315980098069baa00880145900e45900b2016132332259800980398069baa009899912cc004c8cc004004dd6180a003112cc00400629422b30013375e602a60246ea8c0540040622946266004004602c00280810134566002600d3001004803ccdc524504000643b0000024005130069800802401e66e29220104001bc28000002400514a08072294100e1bae3011300e37540124446466446600400400244b3001001801c4c8c96600266e440180062b30013371e00c0031375a602c0050054051133004004301a00340506eb8c050004c05c005015198028020018a4001132330010013233001001330030040072259800800c52f5c113301330113014001330020023015001404844b30010018a518acc004cdc41bad301300148002266004004602800314a0807101120183756601e60206020602060200024464646600200200844b3001001801c4c8c96600266e440180062b30013371e00c0031375660260050054045133004004301700340446eb8c044004c0500050120a5eb7bdb180c02cdd500198051baa006375c601860126ea800cdc3a400516401c300800130033754011149a26cac8009",
+      "hash": "fa4307493638668d1beccc80b38283e2cad2c94f3836e93d7b215f35"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "title": "ByteArray",
+      "dataType": "bytes"
+    },
+    "Int": {
+      "dataType": "integer"
+    },
+    "cardano/transaction/OutputReference": {
+      "title": "OutputReference",
+      "description": "An `OutputReference` is a unique reference to an output on-chain. The `output_index`\n corresponds to the position in the output list of the transaction (identified by its id)\n that produced that output",
+      "anyOf": [
+        {
+          "title": "OutputReference",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "transaction_id",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "output_index",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    },
+    "minting_policy/MintRedeemer": {
+      "title": "MintRedeemer",
+      "anyOf": [
+        {
+          "title": "Mint",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "asset_name",
+              "$ref": "#/definitions/ByteArray"
+            }
+          ]
+        },
+        {
+          "title": "Burn",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": []
+        }
+      ]
+    }
+  }
+}
