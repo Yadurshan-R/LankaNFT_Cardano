@@ -11,6 +11,7 @@ import (
 	"NFT_Minting_Platform/internal/auth"
 	"NFT_Minting_Platform/internal/db"
 	"NFT_Minting_Platform/internal/middleware"
+	"NFT_Minting_Platform/internal/nft"
 )
 
 func main() {
@@ -57,6 +58,10 @@ func main() {
 				"message": "you are authenticated",
 			})
 		})
+
+		// NFT routes — protected
+		nftHandler := nft.NewHandler(db.DB)
+		nftHandler.RegisterRoutes(protected)
 	}
 
 	port := os.Getenv("PORT")

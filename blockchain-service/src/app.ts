@@ -1,7 +1,11 @@
 import express from "express";
+import dotenv from "dotenv";
 import config from "./config";
 import { validateSecret } from "./middleware";
 import { generateWallet, signTransaction, getWalletAddress } from "./wallet";
+import mintRouter from "./routes/mint";
+
+dotenv.config();
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -54,6 +58,9 @@ app.post("/api/wallet/address", async (req, res) => {
     res.status(500).json({ error: "Failed to get address" });
   }
 });
+
+// Mint routes
+app.use("/api/mint", mintRouter);
 
 app.listen(config.port, () => {
   console.log(`Blockchain service running on port ${config.port}`);
