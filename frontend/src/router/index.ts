@@ -16,6 +16,12 @@ const router = createRouter({
       component: () => import('@/views/DashboardView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/mint',
+      name: 'create-mint',
+      component: () => import('@/views/CreateMintView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

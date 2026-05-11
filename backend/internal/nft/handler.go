@@ -2,6 +2,7 @@ package nft
 
 import (
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -31,6 +32,7 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 		nft.POST("/confirm-mint", h.ConfirmMint)
 		nft.POST("/mint", h.MintNFT)
 		nft.GET("/my-nfts", h.GetMyNFTs)
+		nft.GET("/wallet", h.GetWallet)
 	}
 }
 
@@ -143,7 +145,8 @@ func (h *Handler) MintNFT(c *gin.Context) {
 	// Get and decrypt custodial wallet
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
+		log.Printf("GetWalletForUser error for user %s: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet: " + err.Error()})
 		return
 	}
 
@@ -211,6 +214,19 @@ func (h *Handler) ConfirmMint(c *gin.Context) {
 		"message": "NFT minted successfully",
 		"tx_hash": body.TxHash,
 	})
+}
+
+// GetWallet godoc
+// GET /api/nft/wallet
+// Returns the custodial wallet address for the authenticated user
+func (h *Handler) GetWallet(c *gin.Context) {
+	userID := c.GetString("user_id")
+	_, address, err := h.service.GetWalletForUser(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"wallet_address": address})
 }
 
 // GetMyNFTs godoc

@@ -74,18 +74,18 @@ router.post("/single", async (req: Request, res: Response) => {
     const txHash = utxo.input.txHash;
     const txIndex = utxo.input.outputIndex;
 
-    // Collateral must be a different UTxO from the one being consumed
+    // Collateral must be ADA-only (no native tokens) and different from the one-shot UTxO.
+    // Cardano rejects collateral that contains native tokens (CollateralContainsNonADA error).
     const collateralUtxo = utxos.find(
       (u) =>
-        !(
-          u.input.txHash === txHash && u.input.outputIndex === txIndex
-        )
+        !(u.input.txHash === txHash && u.input.outputIndex === txIndex) &&
+        u.output.amount.every((a) => a.unit === "lovelace")
     );
     if (!collateralUtxo) {
       res.status(400).json({
         error:
-          "Wallet needs at least 2 UTxOs: one to consume (one-shot) and one for Plutus collateral. " +
-          "Send additional tADA to the wallet address and try again.",
+          "No pure-ADA UTxO available for collateral. " +
+          "Send at least 5 tADA to a fresh address in this wallet and try again.",
       });
       return;
     }
