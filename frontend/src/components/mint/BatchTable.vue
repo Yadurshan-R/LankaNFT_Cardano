@@ -1,23 +1,25 @@
 <template>
   <div class="batch-table-wrap">
+    <!-- Drag & Drop Zone — works on all platforms including Linux -->
+    <div
+      class="drop-zone"
+      :class="{ 'drop-zone--active': isDragging }"
+      @dragover.prevent="isDragging = true"
+      @dragleave.prevent="isDragging = false"
+      @drop.prevent="onDrop"
+    >
+      <div class="drop-zone-content">
+        <div class="drop-icon">📂</div>
+        <p class="drop-title">Drag & drop images or a folder here</p>
+        <p class="drop-sub">Or use the buttons below to add files</p>
+      </div>
+    </div>
+
     <!-- Toolbar -->
     <div class="table-toolbar">
       <span class="item-count">{{ rows.length }} items</span>
       <div class="toolbar-actions">
-        <!-- Upload whole folder at once -->
-        <label class="toolbar-btn">
-          📁 Upload Folder
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            webkitdirectory
-            style="display:none"
-            @change="onFolderUpload"
-          />
-        </label>
-
-        <!-- Upload individual files -->
+        <!-- Upload individual files — most reliable on Linux -->
         <label class="toolbar-btn">
           🖼 Add Images
           <input
@@ -37,6 +39,15 @@
 
         <!-- Add empty row -->
         <button class="toolbar-btn" @click="addRow">+ Add Row</button>
+
+        <!-- Clear all -->
+        <button
+          v-if="rows.length > 0"
+          class="toolbar-btn toolbar-btn--danger"
+          @click="clearAll"
+        >
+          🗑 Clear All
+        </button>
       </div>
     </div>
 
@@ -58,7 +69,7 @@
           <tr v-for="(row, i) in rows" :key="row.id">
             <td class="row-num">{{ i + 1 }}</td>
 
-            <!-- Image upload per row -->
+            <!-- Image per row -->
             <td>
               <label class="img-upload">
                 <img v-if="row.previewUrl" :src="row.previewUrl" class="img-preview" alt="" />
@@ -72,25 +83,14 @@
               </label>
             </td>
 
-            <!-- Editable name -->
             <td>
-              <input
-                v-model="row.name"
-                class="cell-input"
-                placeholder="Enter name"
-              />
+              <input v-model="row.name" class="cell-input" placeholder="Enter name" />
             </td>
 
-            <!-- Editable description -->
             <td>
-              <input
-                v-model="row.description"
-                class="cell-input"
-                placeholder="Enter description"
-              />
+              <input v-model="row.description" class="cell-input" placeholder="Enter description" />
             </td>
 
-            <!-- Royalties -->
             <td>
               <input
                 v-model.number="row.royalties"
@@ -101,7 +101,6 @@
               />
             </td>
 
-            <!-- Supply -->
             <td>
               <input
                 v-model.number="row.supply"
@@ -111,7 +110,6 @@
               />
             </td>
 
-            <!-- Delete row -->
             <td>
               <button class="delete-btn" @click="removeRow(i)">✕</button>
             </td>
@@ -122,7 +120,7 @@
 
     <!-- Empty state -->
     <div v-if="rows.length === 0" class="empty-state">
-      <p>No items yet. Upload a folder or add rows manually.</p>
+      <p>No items yet. Drag images above or click Add Images.</p>
     </div>
   </div>
 </template>
@@ -150,12 +148,14 @@ const emit = defineEmits<{
 
 let nextId = 1
 const rows = ref<BatchRow[]>([])
+const isDragging = ref(false)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function createRow(file?: File): BatchRow {
+  const rowId = nextId++
   const row: BatchRow = {
-    id: nextId++,
+    id: rowId,
     name: file ? fileNameWithoutExtension(file.name) : '',
     description: '',
     royalties: 5,
@@ -164,11 +164,15 @@ function createRow(file?: File): BatchRow {
     previewUrl: null,
   }
 
-  // Generate preview URL for image files
   if (file && file.type.startsWith('image/')) {
     const reader = new FileReader()
     reader.onload = (ev) => {
-      row.previewUrl = ev.target?.result as string
+      // Find row in reactive array AFTER it has been pushed
+      // This ensures Vue tracks the previewUrl update correctly
+      const reactiveRow = rows.value.find((r) => r.id === rowId)
+      if (reactiveRow) {
+        reactiveRow.previewUrl = ev.target?.result as string
+      }
     }
     reader.readAsDataURL(file)
   }
@@ -176,13 +180,25 @@ function createRow(file?: File): BatchRow {
   return row
 }
 
-// Remove file extension and clean up the name
 function fileNameWithoutExtension(filename: string): string {
   return filename.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ')
 }
 
 function notifyChange() {
   emit('change', rows.value)
+}
+
+// Process a list of files — filter images, sort by name, add rows
+function addFiles(files: File[]) {
+  const imageFiles = files
+    .filter((f) => f.type.startsWith('image/'))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  imageFiles.forEach((file) => {
+    rows.value.push(createRow(file))
+  })
+
+  if (imageFiles.length > 0) notifyChange()
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
@@ -197,39 +213,100 @@ function removeRow(index: number) {
   notifyChange()
 }
 
-// Upload entire folder — creates one row per image file
-function onFolderUpload(e: Event) {
-  const files = Array.from((e.target as HTMLInputElement).files ?? [])
-  if (files.length === 0) return
-
-  const imageFiles = files
-    .filter((f) => f.type.startsWith('image/'))
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  imageFiles.forEach((file) => {
-    rows.value.push(createRow(file))
-  })
-
+function clearAll() {
+  rows.value = []
   notifyChange()
-  ;(e.target as HTMLInputElement).value = ''
 }
 
-// Upload multiple individual files
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+// Works for both individual files AND folders on all platforms
+// On Linux: drag a folder from Files app → drops all images inside
+async function onDrop(e: DragEvent) {
+  isDragging.value = false
+
+  const items = Array.from(e.dataTransfer?.items ?? [])
+  const allFiles: File[] = []
+
+  // Process each dropped item — handles both files and folders
+  await Promise.all(
+    items.map(async (item) => {
+      const entry = item.webkitGetAsEntry?.()
+      if (!entry) return
+
+      if (entry.isFile) {
+        // Single file dropped
+        const file = await getFileFromEntry(entry as FileSystemFileEntry)
+        if (file) allFiles.push(file)
+      } else if (entry.isDirectory) {
+        // Folder dropped — read all files inside recursively
+        const files = await readDirectoryFiles(entry as FileSystemDirectoryEntry)
+        allFiles.push(...files)
+      }
+    })
+  )
+
+  addFiles(allFiles)
+}
+
+// Get File object from a FileSystemFileEntry
+function getFileFromEntry(entry: FileSystemFileEntry): Promise<File | null> {
+  return new Promise((resolve) => {
+    entry.file(
+      (file) => resolve(file),
+      () => resolve(null)
+    )
+  })
+}
+
+// Recursively read all files from a dropped folder
+async function readDirectoryFiles(
+  dirEntry: FileSystemDirectoryEntry
+): Promise<File[]> {
+  return new Promise((resolve) => {
+    const reader = dirEntry.createReader()
+    const allFiles: File[] = []
+
+    function readBatch() {
+      reader.readEntries(async (entries) => {
+        if (entries.length === 0) {
+          resolve(allFiles)
+          return
+        }
+
+        for (const entry of entries) {
+          if (entry.isFile) {
+            const file = await getFileFromEntry(entry as FileSystemFileEntry)
+            if (file) allFiles.push(file)
+          } else if (entry.isDirectory) {
+            // Handle nested folders
+            const nested = await readDirectoryFiles(
+              entry as FileSystemDirectoryEntry
+            )
+            allFiles.push(...nested)
+          }
+        }
+
+        // Read next batch (browsers return max 100 entries at a time)
+        readBatch()
+      })
+    }
+
+    readBatch()
+  })
+}
+
+// ── File Input Handlers ───────────────────────────────────────────────────────
+
 function onMultiFileUpload(e: Event) {
   const files = Array.from((e.target as HTMLInputElement).files ?? [])
-  files.forEach((file) => {
-    rows.value.push(createRow(file))
-  })
-  notifyChange()
+  addFiles(files)
   ;(e.target as HTMLInputElement).value = ''
 }
 
-// Change image for a single row
 function onSingleFileChange(e: Event, index: number) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
 
-  // Guard against undefined row
   const row = rows.value[index]
   if (!row) return
 
@@ -247,9 +324,8 @@ function onSingleFileChange(e: Event, index: number) {
   notifyChange()
 }
 
-// Import metadata from CSV
-// Expected columns: name, description, royalties, supply
-// Matches rows by order — CSV row 1 = table row 1
+// ── CSV Import ────────────────────────────────────────────────────────────────
+
 function importCSV(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
@@ -263,12 +339,10 @@ function importCSV(e: Event) {
     const headers = (lines[0] ?? '').split(',').map((h) => h.trim().toLowerCase())
 
     for (let i = 1; i < lines.length; i++) {
-      // Guard against undefined line
       const line = lines[i] ?? ''
       const values = line.split(',').map((v) => v.trim().replace(/^"|"$/g, ''))
       const rowIndex = i - 1
 
-      // If row doesn't exist yet, create one
       if (rowIndex >= rows.value.length) {
         rows.value.push(createRow())
       }
@@ -291,13 +365,33 @@ function importCSV(e: Event) {
   ;(e.target as HTMLInputElement).value = ''
 }
 
-// Expose rows so parent can read them
 defineExpose({ rows })
 </script>
 
 <style scoped>
 .batch-table-wrap { width: 100%; }
 
+/* Drop Zone */
+.drop-zone {
+  border: 2px dashed #d0d0d0;
+  border-radius: 12px;
+  padding: 32px;
+  text-align: center;
+  margin-bottom: 16px;
+  transition: all 0.2s;
+  cursor: default;
+}
+.drop-zone--active {
+  border-color: #534AB7;
+  background: #EEEDFE;
+}
+.drop-zone:hover { border-color: #534AB7; }
+.drop-zone-content { pointer-events: none; }
+.drop-icon { font-size: 32px; margin-bottom: 8px; }
+.drop-title { font-size: 15px; font-weight: 500; color: #333; margin: 0 0 4px; }
+.drop-sub { font-size: 13px; color: #888; margin: 0; }
+
+/* Toolbar */
 .table-toolbar {
   display: flex;
   justify-content: space-between;
@@ -322,7 +416,9 @@ defineExpose({ rows })
   gap: 4px;
 }
 .toolbar-btn:hover { border-color: #534AB7; color: #534AB7; }
+.toolbar-btn--danger:hover { border-color: #d32f2f; color: #d32f2f; }
 
+/* Table */
 .table-scroll { overflow-x: auto; border: 1px solid #f0f0f0; border-radius: 10px; }
 .batch-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .batch-table th {
@@ -341,7 +437,6 @@ defineExpose({ rows })
   vertical-align: middle;
 }
 .batch-table tr:last-child td { border-bottom: none; }
-
 .row-num { color: #bbb; font-size: 12px; text-align: center; }
 
 .cell-input {
