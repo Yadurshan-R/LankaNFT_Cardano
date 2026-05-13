@@ -235,10 +235,9 @@ func (s *Service) GetWalletForUser(ctx context.Context, userID string) ([]string
 	return words, walletAddress, nil
 }
 
-// sanitizeAssetName removes spaces and special chars
-// Cardano asset names must be valid bytes
+// sanitizeAssetName removes spaces and special chars for on-chain use
+// Cardano asset names must be valid bytes and max 32 bytes long
 func sanitizeAssetName(name string) string {
-	// Replace spaces with underscores, keep alphanumeric
 	result := strings.ReplaceAll(name, " ", "_")
 	var clean strings.Builder
 	for _, ch := range result {
@@ -249,5 +248,11 @@ func sanitizeAssetName(name string) string {
 			clean.WriteRune(ch)
 		}
 	}
-	return clean.String()
+	// Cardano asset name max = 32 bytes
+	// Truncate if longer
+	s := clean.String()
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return s
 }

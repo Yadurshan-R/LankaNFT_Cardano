@@ -84,10 +84,10 @@ type ItemResult struct {
 func (s *Service) CreateBatchJob(ctx context.Context, ownerID string, total int) (string, error) {
 	var batchID string
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO batch_jobs (owner_id, status, total)
-		VALUES ($1, 'pending', $2)
-		RETURNING id
-	`, ownerID, total).Scan(&batchID)
+        INSERT INTO batch_jobs (owner_id, status, total)
+        VALUES ($1, 'pending', $2)
+        RETURNING id
+    `, ownerID, total).Scan(&batchID)
 	if err != nil {
 		return "", fmt.Errorf("failed to create batch job: %w", err)
 	}
@@ -129,19 +129,19 @@ func (s *Service) ProcessBatchItem(
 
 	// Store NFT record in DB
 	err = s.db.QueryRow(ctx, `
-		INSERT INTO nfts (
-			owner_id, policy_id, asset_name,
-			ref_token_name, user_token_name,
-			nft_name, description,
-			image_ipfs, metadata_ipfs,
-			royalties, total_supply, privacy, mint_type,
-			status
-		) VALUES (
-			$1, '', $2, $3, $4,
-			$5, $6, $7, $8,
-			$9, $10, $11, 'standard', 'pending'
-		) RETURNING id
-	`,
+        INSERT INTO nfts (
+            owner_id, policy_id, asset_name,
+            ref_token_name, user_token_name,
+            nft_name, description,
+            image_ipfs, metadata_ipfs,
+            royalties, total_supply, privacy, mint_type,
+            status
+        ) VALUES (
+            $1, '', $2, $3, $4,
+            $5, $6, $7, $8,
+            $9, $10, $11, 'standard', 'pending'
+        ) RETURNING id
+    `,
 		ownerID, assetName,
 		"000643b0"+assetName,
 		"001bc280"+assetName,
@@ -155,12 +155,12 @@ func (s *Service) ProcessBatchItem(
 
 	// Store batch item record
 	_, err = s.db.Exec(ctx, `
-		INSERT INTO batch_items (
-			batch_id, nft_id, row_order,
-			nft_name, description, royalties,
-			total_supply, image_name, status
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'uploaded')
-	`,
+        INSERT INTO batch_items (
+            batch_id, nft_id, row_order,
+            nft_name, description, royalties,
+            total_supply, image_name, status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'uploaded')
+    `,
 		batchID, nftID, item.RowOrder,
 		item.Name, item.Description, item.Royalties,
 		item.TotalSupply, item.ImageName,
@@ -171,16 +171,16 @@ func (s *Service) ProcessBatchItem(
 
 	// Store IPFS pins
 	s.db.Exec(ctx, `
-		INSERT INTO ipfs_pins (nft_id, ipfs_hash, pin_type, file_name, file_size)
-		VALUES ($1, $2, 'image', $3, $4)
-		ON CONFLICT (ipfs_hash) DO NOTHING
-	`, nftID, imagePin.IpfsHash, item.ImageName, imagePin.PinSize)
+        INSERT INTO ipfs_pins (nft_id, ipfs_hash, pin_type, file_name, file_size)
+        VALUES ($1, $2, 'image', $3, $4)
+        ON CONFLICT (ipfs_hash) DO NOTHING
+    `, nftID, imagePin.IpfsHash, item.ImageName, imagePin.PinSize)
 
 	s.db.Exec(ctx, `
-		INSERT INTO ipfs_pins (nft_id, ipfs_hash, pin_type, file_name)
-		VALUES ($1, $2, 'metadata', $3)
-		ON CONFLICT (ipfs_hash) DO NOTHING
-	`, nftID, metaPin.IpfsHash, item.Name+"_metadata.json")
+        INSERT INTO ipfs_pins (nft_id, ipfs_hash, pin_type, file_name)
+        VALUES ($1, $2, 'metadata', $3)
+        ON CONFLICT (ipfs_hash) DO NOTHING
+    `, nftID, metaPin.IpfsHash, item.Name+"_metadata.json")
 
 	return nftID, imageIPFS, metadataIPFS, assetName, nil
 }
@@ -207,37 +207,37 @@ func (s *Service) MintBatchItem(
 	if err != nil {
 		// Mark batch item as failed
 		s.db.Exec(ctx, `
-			UPDATE batch_items SET status = 'failed', error_msg = $1
-			WHERE batch_id = $2 AND nft_id = $3
-		`, err.Error(), batchID, nftID)
+            UPDATE batch_items SET status = 'failed', error_msg = $1
+            WHERE batch_id = $2 AND nft_id = $3
+        `, err.Error(), batchID, nftID)
 
 		// Increment failed count on batch job
 		s.db.Exec(ctx, `
-			UPDATE batch_jobs SET failed = failed + 1, updated_at = NOW()
-			WHERE id = $1
-		`, batchID)
+            UPDATE batch_jobs SET failed = failed + 1, updated_at = NOW()
+            WHERE id = $1
+        `, batchID)
 
 		return fmt.Errorf("mint failed: %w", err)
 	}
 
 	// Update NFT status to minted
 	s.db.Exec(ctx, `
-		UPDATE nfts
-		SET status = 'minted', tx_hash = $1, policy_id = $2, updated_at = NOW()
-		WHERE id = $3
-	`, mintResult.TxHash, mintResult.PolicyID, nftID)
+        UPDATE nfts
+        SET status = 'minted', tx_hash = $1, policy_id = $2, updated_at = NOW()
+        WHERE id = $3
+    `, mintResult.TxHash, mintResult.PolicyID, nftID)
 
 	// Update batch item status
 	s.db.Exec(ctx, `
-		UPDATE batch_items SET status = 'minted'
-		WHERE batch_id = $1 AND nft_id = $2
-	`, batchID, nftID)
+        UPDATE batch_items SET status = 'minted'
+        WHERE batch_id = $1 AND nft_id = $2
+    `, batchID, nftID)
 
 	// Increment minted count on batch job
 	s.db.Exec(ctx, `
-		UPDATE batch_jobs SET minted = minted + 1, updated_at = NOW()
-		WHERE id = $1
-	`, batchID)
+        UPDATE batch_jobs SET minted = minted + 1, updated_at = NOW()
+        WHERE id = $1
+    `, batchID)
 
 	return nil
 }
@@ -245,9 +245,9 @@ func (s *Service) MintBatchItem(
 // UpdateBatchStatus updates the overall batch job status
 func (s *Service) UpdateBatchStatus(ctx context.Context, batchID, status string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE batch_jobs SET status = $1, updated_at = NOW()
-		WHERE id = $2
-	`, status, batchID)
+        UPDATE batch_jobs SET status = $1, updated_at = NOW()
+        WHERE id = $2
+    `, status, batchID)
 	return err
 }
 
@@ -258,10 +258,10 @@ func (s *Service) GetBatchStatus(ctx context.Context, batchID, ownerID string) (
 	var createdAt interface{}
 
 	err := s.db.QueryRow(ctx, `
-		SELECT id, owner_id, status, total, uploaded, minted, failed, created_at
-		FROM batch_jobs
-		WHERE id = $1 AND owner_id = $2
-	`, batchID, ownerID).Scan(
+        SELECT id, owner_id, status, total, uploaded, minted, failed, created_at
+        FROM batch_jobs
+        WHERE id = $1 AND owner_id = $2
+    `, batchID, ownerID).Scan(
 		&id, &owner, &status, &total,
 		&uploaded, &minted, &failed, &createdAt,
 	)
@@ -284,10 +284,10 @@ func (s *Service) GetBatchStatus(ctx context.Context, batchID, ownerID string) (
 func (s *Service) GetWalletForUser(ctx context.Context, userID string) ([]string, string, error) {
 	var encryptedMnemonic, walletAddress string
 	err := s.db.QueryRow(ctx, `
-		SELECT encrypted_mnemonic, wallet_address
-		FROM custodial_wallets
-		WHERE user_id = $1
-	`, userID).Scan(&encryptedMnemonic, &walletAddress)
+        SELECT encrypted_mnemonic, wallet_address
+        FROM custodial_wallets
+        WHERE user_id = $1
+    `, userID).Scan(&encryptedMnemonic, &walletAddress)
 	if err != nil {
 		return nil, "", fmt.Errorf("wallet not found for user: %w", err)
 	}
@@ -302,6 +302,7 @@ func (s *Service) GetWalletForUser(ctx context.Context, userID string) ([]string
 }
 
 // sanitizeAssetName removes spaces and special chars for on-chain use
+// Cardano asset names must be valid bytes and max 32 bytes long
 func sanitizeAssetName(name string) string {
 	result := strings.ReplaceAll(name, " ", "_")
 	var clean strings.Builder
@@ -313,5 +314,11 @@ func sanitizeAssetName(name string) string {
 			clean.WriteRune(ch)
 		}
 	}
-	return clean.String()
+	// Cardano asset name max = 32 bytes
+	// Truncate if longer
+	s := clean.String()
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return s
 }

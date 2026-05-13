@@ -12,9 +12,11 @@
           <button :class="['toggle-btn', { active: uploadMode === 'single' }]" @click="uploadMode = 'single'">
             Single Upload
           </button>
-          <button :class="['toggle-btn', { active: uploadMode === 'batch' }]" @click="uploadMode = 'batch'">
-            Batch Upload
-          </button>
+          <router-link to="/batch">
+            <button :class="['toggle-btn', { active: uploadMode === 'batch' }]">
+              Batch Upload
+            </button>
+          </router-link>
         </div>
       </div>
     </div>

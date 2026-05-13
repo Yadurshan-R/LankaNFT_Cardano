@@ -22,6 +22,12 @@ const router = createRouter({
       component: () => import('@/views/CreateMintView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/batch',
+      name: 'batch-mint',
+      component: () => import('@/views/BatchMintView.vue'),
+      meta: { requiresAuth: true },
+  },
   ],
 })
 

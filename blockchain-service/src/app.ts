@@ -1,9 +1,21 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// blockchain-service/src/app.ts
+//
+// Blockchain Service Entry Point
+//
+// This Node.js service handles all Cardano blockchain operations:
+//   - Wallet generation and signing
+//   - Single NFT minting (CIP-68 + CIP-102, one-shot Plutus policy)
+//   - Batch NFT minting (CIP-68, native script collection policy)
+// ─────────────────────────────────────────────────────────────────────────────
+
 import express from "express";
 import dotenv from "dotenv";
 import config from "./config";
 import { validateSecret } from "./middleware";
 import { generateWallet, signTransaction, getWalletAddress } from "./wallet";
 import mintRouter from "./routes/mint";
+import batchRouter from "./routes/batch";
 
 dotenv.config();
 
@@ -59,8 +71,11 @@ app.post("/api/wallet/address", async (req, res) => {
   }
 });
 
-// Mint routes
+// Single NFT minting — Plutus one-shot policy (unique policy per NFT)
 app.use("/api/mint", mintRouter);
+
+// Batch NFT minting — Native script collection policy (all NFTs in one tx)
+app.use("/api/mint", batchRouter);
 
 app.listen(config.port, () => {
   console.log(`Blockchain service running on port ${config.port}`);

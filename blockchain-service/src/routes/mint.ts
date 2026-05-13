@@ -137,26 +137,43 @@ router.post("/single", async (req: Request, res: Response) => {
       return;
     }
 
-    // One-shot UTxO: consumed to make this policy unique forever
-    const oneShotUtxo = utxos[0];
-    const txHash = oneShotUtxo.input.txHash;
-    const txIndex = oneShotUtxo.input.outputIndex;
-
-    // Collateral UTxO: must be pure ADA only — no native tokens allowed
-    const collateralUtxo = utxos.find(
-      (u) =>
-        !(u.input.txHash === txHash && u.input.outputIndex === txIndex) &&
-        u.output.amount.every((a) => a.unit === "lovelace")
+    // Find pure ADA UTxOs (no native tokens)
+    const pureAdaUtxos = utxos.filter((u) =>
+      u.output.amount.every((a) => a.unit === "lovelace")
     );
 
-    if (!collateralUtxo) {
+    if (pureAdaUtxos.length === 0) {
       res.status(400).json({
-        error:
-          "No pure-ADA UTxO available for collateral. " +
-          "Send at least 5 tADA to the wallet address and try again.",
+        error: "No pure-ADA UTxO available. Send at least 5 tADA to the wallet.",
       });
       return;
     }
+
+    // Sort pure ADA UTxOs by amount ascending
+    // Use the SMALLEST pure ADA UTxO as the one-shot input
+    // Keep the LARGEST pure ADA UTxO as collateral reserve
+    const sortedPureAda = pureAdaUtxos.sort((a, b) => {
+      const aAda = parseInt(a.output.amount.find(x => x.unit === "lovelace")?.quantity || "0")
+      const bAda = parseInt(b.output.amount.find(x => x.unit === "lovelace")?.quantity || "0")
+      return aAda - bAda
+    })
+
+    // One-shot UTxO: smallest pure ADA UTxO
+    const oneShotUtxo = sortedPureAda[0]!
+    const txHash = oneShotUtxo.input.txHash
+    const txIndex = oneShotUtxo.input.outputIndex
+
+    // Collateral UTxO: largest pure ADA UTxO (different from one-shot)
+    // If only one pure ADA UTxO exists, we cannot proceed safely
+    if (pureAdaUtxos.length < 2) {
+      res.status(400).json({
+        error:
+          "Need at least 2 pure-ADA UTxOs (one for minting, one for collateral). " +
+          "Send at least 5 tADA to the wallet address.",
+      });
+      return;
+    }
+    const collateralUtxo = sortedPureAda[sortedPureAda.length - 1]!
 
     // ── Parameterize the minting policy ───────────────────────────────────
     // OutputReference = ConStr0 [ txHash, txIndex ]
