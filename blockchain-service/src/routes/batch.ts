@@ -1,27 +1,28 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // blockchain-service/src/routes/batch.ts
 //
-// CIP-68 Compliant Batch NFT Minting Route — Native Script Collection Policy
+// CIP-68 + CIP-102 Compliant Batch NFT Minting — Time-Locked Native Script
 //
-// This route mints ALL NFTs in a batch in ONE single Cardano transaction.
-// This is how NMKR and professional platforms handle batch minting.
+// Professional batch minting — same architecture as NMKR and jpg.store.
 //
-// How it works:
-//   - Uses a Native Script policy (ForgeScript.withOneSignature)
-//   - The policy is locked to the creator's wallet address
-//   - All NFTs in the batch share ONE policy ID
-//   - All (100) ref NFTs + (222) user NFTs minted in one transaction
-//   - One (500) royalty NFT minted for the whole collection
-//   - No UTxO conflicts — no one-shot UTxO needed
-//   - No collateral needed — native scripts don't require Plutus collateral
-//   - Fast — no waiting between mints
+// FIXES APPLIED:
 //
-// Token structure per NFT (CIP-68):
-//   (100) Reference NFT → locked at immutable_lock script with CIP-68 datum
-//   (222) User NFT      → sent to creator wallet
+//   Fix 1 — CIP-68 datum uses proper Plutus Map format via metadataToCip68()
+//            Old: list of tuples (wrong CBOR encoding, marketplaces reject it)
+//            New: Plutus Map (correct CIP-68 encoding, all marketplaces accept)
 //
-// Collection tokens (once per batch):
-//   (500) Royalty NFT   → locked at royalty_lock script with CIP-102 datum
+//   Fix 2 — Royalty token name follows CIP-102 correctly
+//            Old: hardcoded wrong hex
+//            New: "001f4d70" (label 500) + hex(first_nft_asset_name)
+//
+//   Fix 3 — Policy is time-locked after 2 hours
+//            Old: open forever, creator can mint more tokens anytime
+//            New: NativeScript { all: [sig, before(slot)] } — locks after 2h
+//
+//   Fix 4 — Native script IS the correct professional standard for batch
+//            Our Aiken cip68_mint_collection accepts one asset_name per
+//            redeemer — cannot validate multiple NFTs in one tx without a
+//            contract rewrite. Native script is what NMKR and jpg.store use.
 //
 // References:
 //   CIP-68: https://cips.cardano.org/cip/CIP-68
@@ -31,15 +32,20 @@
 import { Router, Request, Response } from "express";
 import {
   BlockfrostProvider,
-  ForgeScript,
   MeshTxBuilder,
   MeshWallet,
+  NativeScript,
+  SLOT_CONFIG_NETWORK,
   applyCborEncoding,
   mConStr0,
-  resolveScriptHash,
+  metadataToCip68,
+  resolveNativeScriptHash,
+  resolvePaymentKeyHash,
   serializeData,
+  serializeNativeScript,
   serializePlutusScript,
   stringToHex,
+  unixTimeToEnclosingSlot,
 } from "@meshsdk/core";
 import config from "../config";
 import fs from "fs";
@@ -63,6 +69,7 @@ const immutableLockValidator = getValidator(
 const royaltyLockValidator = getValidator("royalty_lock.royalty_lock.spend");
 
 // ─── Script Addresses ─────────────────────────────────────────────────────────
+// Reference NFTs locked here permanently (CIP-68)
 const immutableLockAddress = serializePlutusScript(
   {
     code: applyCborEncoding(immutableLockValidator.compiledCode),
@@ -72,6 +79,7 @@ const immutableLockAddress = serializePlutusScript(
   0
 ).address;
 
+// Royalty NFT locked here (CIP-102)
 const royaltyLockAddress = serializePlutusScript(
   {
     code: applyCborEncoding(royaltyLockValidator.compiledCode),
@@ -96,16 +104,17 @@ interface BatchNFTItem {
 /**
  * POST /api/mint/batch
  *
- * Mints ALL NFTs in a batch in ONE Cardano transaction.
- * Uses a native script collection policy tied to the creator's wallet.
+ * Mints ALL NFTs in ONE Cardano transaction.
+ * Uses a time-locked native script collection policy.
  *
  * Request body:
  *   mnemonic  string[]       — 24 word mnemonic of the custodial wallet
- *   items     BatchNFTItem[] — list of NFTs to mint
+ *   items     BatchNFTItem[] — list of NFTs to mint (max 100)
  *
  * Response:
  *   tx_hash    string   — single Cardano transaction hash for all NFTs
  *   policy_id  string   — shared policy ID for the whole collection
+ *   lock_slot  number   — slot after which no more minting is possible
  *   minted     number   — number of NFTs minted
  *   tokens     object[] — list of minted token details
  */
@@ -149,34 +158,73 @@ router.post("/batch", async (req: Request, res: Response) => {
 
     const creatorAddress = await wallet.getChangeAddress();
 
-    // ── Native Script Collection Policy ───────────────────────────────────
-    // ForgeScript.withOneSignature creates a native script policy
-    // that requires the creator's wallet signature to mint
-    // This is how NMKR handles collections — simple, reliable, no Plutus overhead
-    const forgingScript = ForgeScript.withOneSignature(creatorAddress);
-    const policyId = resolveScriptHash(forgingScript);
+    // ── Fix 3: Time-locked native script policy ───────────────────────────
+    // Extract payment key hash from creator address
+    const paymentKeyHash = resolvePaymentKeyHash(creatorAddress);
+
+    // Lock policy 2 hours from now on Cardano Preprod
+    // After lockSlot: nobody — not even the creator — can mint more tokens
+    // This makes the collection supply provably fixed
+    const LOCK_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours in ms
+    const lockTime = Date.now() + LOCK_WINDOW_MS;
+    const lockSlot = unixTimeToEnclosingSlot(
+      lockTime,
+      SLOT_CONFIG_NETWORK["preprod"]
+    );
+
+    // Native script: ALL conditions must be satisfied:
+    //   1. Transaction signed by creator's payment key
+    //   2. Transaction submitted before lockSlot
+    const nativeScript: NativeScript = {
+      type: "all",
+      scripts: [
+        {
+          type: "sig",
+          keyHash: paymentKeyHash,
+        },
+        {
+          type: "before",
+          slot: lockSlot.toString(),
+        },
+      ],
+    };
+
+    // serializeNativeScript returns { address, scriptCbor }
+    // We need scriptCbor for mintingScript()
+    const serialized = serializeNativeScript(nativeScript);
+    const forgingScript = serialized.scriptCbor!;
+
+    // Derive policy ID from the native script
+    const policyId = resolveNativeScriptHash(nativeScript);
 
     console.log(`🎨 Batch mint — policy: ${policyId}, items: ${items.length}`);
+    console.log(`   Lock slot: ${lockSlot} (~2 hours from now)`);
 
-    // ── Build CIP-102 royalty datum ───────────────────────────────────────
-    // Use royalty from the first item for the whole collection
-    const collectionRoyalties = items[0]?.royalties ?? 0;
-    const royaltyRate = Math.floor((collectionRoyalties / 100) * 1_000_000);
+    // ── Fix 2: Correct CIP-102 royalty token name ─────────────────────────
+    // Royalty token = label 500 prefix + same base name as first NFT
+    // Per CIP-102: (500) token shares the collection's base asset name
+    const firstAssetName = items[0]?.asset_name ?? "Collection";
+    const royaltyTokenName = "001f4d70" + stringToHex(firstAssetName);
 
-    const royaltyTokenName = "001f4d7043006f006c006c656374696f6e"; // (500)Collection
+    // Average royalty rate across all items in the collection
+    const avgRoyalties =
+      items.reduce((sum, item) => sum + item.royalties, 0) / items.length;
+    const royaltyRate = Math.floor((avgRoyalties / 100) * 1_000_000);
 
+    // CIP-102 royalty datum
+    // RoyaltyLockDatum { owner, royalty: RoyaltyDatum { recipients, min_ada }, collection_policy }
     const royaltyDatum = mConStr0([
-      stringToHex(creatorAddress),
-      mConStr0([
+      stringToHex(creatorAddress),  // owner — creator can update terms
+      mConStr0([                    // RoyaltyDatum
         [
-          mConStr0([
-            stringToHex(creatorAddress),
-            royaltyRate,
+          mConStr0([                // RoyaltyRecipient
+            stringToHex(creatorAddress), // creator receives royalties
+            royaltyRate,                 // e.g. 50000 for 5%
           ]),
         ],
-        2_000_000,
+        2_000_000,                  // min_ada — minimum 2 ADA per payment
       ]),
-      policyId,
+      policyId,                     // collection_policy
     ]);
     const royaltyDatumCbor = serializeData(royaltyDatum);
 
@@ -186,7 +234,7 @@ router.post("/batch", async (req: Request, res: Response) => {
       submitter: provider,
     });
 
-    // Start building — add royalty NFT first
+    // Mint royalty NFT first — one per collection
     txBuilder
       .mint("1", policyId, royaltyTokenName)
       .mintingScript(forgingScript)
@@ -198,26 +246,25 @@ router.post("/batch", async (req: Request, res: Response) => {
     // Track all minted tokens for the response
     const tokens: object[] = [];
 
-    // Add all NFTs to the same transaction
+    // ── Fix 1: Correct CIP-68 datum per NFT ──────────────────────────────
+    // metadataToCip68() builds proper Plutus Map datum
+    // Marketplaces (jpg.store, CNFT.io) read this to display NFT metadata
     for (const item of items) {
       const assetNameHex = stringToHex(item.asset_name);
-      const refTokenName = "000643b0" + assetNameHex;   // (100) Reference NFT
-      const userTokenName = "001bc280" + assetNameHex;  // (222) User NFT
+      const refTokenName = "000643b0" + assetNameHex;  // (100) Reference NFT
+      const userTokenName = "001bc280" + assetNameHex; // (222) User NFT
 
-      // CIP-68 metadata datum for this NFT's reference token
-      const cip68Datum = mConStr0([
-        [
-          [stringToHex("name"),        stringToHex(item.asset_name)],
-          [stringToHex("image"),       stringToHex(item.image_ipfs)],
-          [stringToHex("mediaType"),   stringToHex("image/png")],
-          [stringToHex("description"), stringToHex("")],
-          [stringToHex("files"),       []],
-        ],
-        1, // CIP-68 version
-      ]);
+      // Proper CIP-68 metadata map — ConStr0([Map, version])
+      const cip68Datum = metadataToCip68({
+        name: item.asset_name,
+        image: item.image_ipfs,
+        mediaType: "image/png",
+        description: "",
+        files: [],
+      });
       const cip68DatumCbor = serializeData(cip68Datum);
 
-      // Mint (100) Reference NFT — goes to immutable_lock with CIP-68 datum
+      // Mint (100) Reference NFT → immutable_lock with CIP-68 datum
       txBuilder
         .mint("1", policyId, refTokenName)
         .mintingScript(forgingScript)
@@ -226,7 +273,7 @@ router.post("/batch", async (req: Request, res: Response) => {
         ])
         .txOutInlineDatumValue(cip68DatumCbor, "CBOR");
 
-      // Mint (222) User NFT — goes to creator wallet
+      // Mint (222) User NFT → creator wallet
       txBuilder
         .mint("1", policyId, userTokenName)
         .mintingScript(forgingScript)
@@ -242,10 +289,11 @@ router.post("/batch", async (req: Request, res: Response) => {
       });
     }
 
-    // Finalize transaction
+    // Finalize — invalidHereafter required when script has "before" constraint
     const unsignedTx = await txBuilder
       .changeAddress(creatorAddress)
       .selectUtxosFrom(utxos)
+      .invalidHereafter(lockSlot)
       .complete();
 
     // Sign and submit — native script only needs wallet signature
@@ -253,12 +301,14 @@ router.post("/batch", async (req: Request, res: Response) => {
     const txHash = await wallet.submitTx(signedTx);
 
     console.log(`✅ Batch minted — tx: ${txHash}`);
-    console.log(`   Policy ID: ${policyId}`);
+    console.log(`   Policy ID:   ${policyId}`);
+    console.log(`   Lock slot:   ${lockSlot}`);
     console.log(`   NFTs minted: ${items.length}`);
 
     res.json({
       tx_hash:   txHash,
       policy_id: policyId,
+      lock_slot: lockSlot,
       minted:    items.length,
       tokens,
     });
