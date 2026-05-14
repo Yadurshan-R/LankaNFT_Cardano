@@ -16,6 +16,7 @@ import { validateSecret } from "./middleware";
 import { generateWallet, signTransaction, getWalletAddress } from "./wallet";
 import mintRouter from "./routes/mint";
 import batchRouter from "./routes/batch";
+import marketplaceRouter from "./routes/marketplace";
 
 dotenv.config();
 
@@ -76,6 +77,9 @@ app.use("/api/mint", mintRouter);
 
 // Batch NFT minting — Native script collection policy (all NFTs in one tx)
 app.use("/api/mint", batchRouter);
+
+// Marketplace routes
+app.use("/api/marketplace", marketplaceRouter);
 
 app.listen(config.port, () => {
   console.log(`Blockchain service running on port ${config.port}`);

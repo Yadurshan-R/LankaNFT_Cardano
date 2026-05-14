@@ -25,7 +25,6 @@ func NewClient() *Client {
 		baseURL: os.Getenv("BLOCKCHAIN_SERVICE_URL"),
 		secret:  os.Getenv("BLOCKCHAIN_SERVICE_SECRET"),
 		httpClient: &http.Client{
-			// Batch mints can take longer — 120 second timeout
 			Timeout: 120 * time.Second,
 		},
 	}
@@ -33,7 +32,6 @@ func NewClient() *Client {
 
 // ─── Single Mint ──────────────────────────────────────────────────────────────
 
-// MintNFTRequest is sent to the blockchain sidecar for single NFT minting
 type MintNFTRequest struct {
 	Mnemonic     []string `json:"mnemonic"`
 	AssetName    string   `json:"asset_name"`
@@ -42,15 +40,12 @@ type MintNFTRequest struct {
 	Royalties    float64  `json:"royalties"`
 }
 
-// MintNFTResponse is returned after successful single mint
 type MintNFTResponse struct {
 	TxHash    string `json:"tx_hash"`
 	PolicyID  string `json:"policy_id"`
 	AssetName string `json:"asset_name"`
 }
 
-// MintNFT calls the blockchain sidecar to mint a single CIP-68 NFT
-// Uses a one-shot Plutus policy — unique policy ID per NFT
 func (c *Client) MintNFT(req MintNFTRequest) (*MintNFTResponse, error) {
 	resp, err := c.post("/api/mint/single", req)
 	if err != nil {
@@ -62,13 +57,11 @@ func (c *Client) MintNFT(req MintNFTRequest) (*MintNFTResponse, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode mint response: %w", err)
 	}
-
 	return &result, nil
 }
 
 // ─── Batch Mint ───────────────────────────────────────────────────────────────
 
-// BatchMintItem represents one NFT in a batch mint request
 type BatchMintItem struct {
 	NFTID        string  `json:"nft_id"`
 	AssetName    string  `json:"asset_name"`
@@ -77,13 +70,11 @@ type BatchMintItem struct {
 	Royalties    float64 `json:"royalties"`
 }
 
-// BatchMintRequest is sent to the blockchain sidecar for batch minting
 type BatchMintRequest struct {
 	Mnemonic []string        `json:"mnemonic"`
 	Items    []BatchMintItem `json:"items"`
 }
 
-// BatchMintTokenResult is one minted token in the batch response
 type BatchMintTokenResult struct {
 	NFTID     string `json:"nft_id"`
 	AssetName string `json:"asset_name"`
@@ -91,7 +82,6 @@ type BatchMintTokenResult struct {
 	UserToken string `json:"user_token"`
 }
 
-// BatchMintResponse is returned after successful batch mint
 type BatchMintResponse struct {
 	TxHash   string                 `json:"tx_hash"`
 	PolicyID string                 `json:"policy_id"`
@@ -99,9 +89,6 @@ type BatchMintResponse struct {
 	Tokens   []BatchMintTokenResult `json:"tokens"`
 }
 
-// BatchMintNFTs calls the blockchain sidecar to mint all NFTs in one transaction
-// Uses a native script collection policy — all NFTs share one policy ID
-// This is how NMKR handles batch collections — fast, no UTxO conflicts
 func (c *Client) BatchMintNFTs(req BatchMintRequest) (*BatchMintResponse, error) {
 	resp, err := c.post("/api/mint/batch", req)
 	if err != nil {
@@ -113,19 +100,107 @@ func (c *Client) BatchMintNFTs(req BatchMintRequest) (*BatchMintResponse, error)
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode batch mint response: %w", err)
 	}
+	return &result, nil
+}
 
+// ─── Marketplace ──────────────────────────────────────────────────────────────
+
+// ListNFTRequest is sent to the sidecar to lock an NFT at the marketplace script
+type ListNFTRequest struct {
+	Mnemonic        []string `json:"mnemonic"`
+	NFTUnit         string   `json:"nft_unit"`
+	PriceLovelace   int64    `json:"price_lovelace"`
+	RoyaltyPolicyID string   `json:"royalty_policy_id"`
+}
+
+// ListNFTResponse is returned after successful listing
+type ListNFTResponse struct {
+	TxHash             string `json:"tx_hash"`
+	ScriptUTxO         string `json:"script_utxo"`
+	MarketplaceAddress string `json:"marketplace_address"`
+}
+
+// ListNFT calls the sidecar to list an NFT for sale on the marketplace
+func (c *Client) ListNFT(req ListNFTRequest) (*ListNFTResponse, error) {
+	resp, err := c.post("/api/marketplace/list", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result ListNFTResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode list response: %w", err)
+	}
+	return &result, nil
+}
+
+// BuyNFTRequest is sent to the sidecar to purchase a listed NFT
+type BuyNFTRequest struct {
+	Mnemonic         []string `json:"mnemonic"`
+	ListingUTxOHash  string   `json:"listing_utxo_hash"`
+	ListingUTxOIndex string   `json:"listing_utxo_index"`
+	SellerAddress    string   `json:"seller_address"`
+	PriceLovelace    int64    `json:"price_lovelace"`
+	NFTUnit          string   `json:"nft_unit"`
+	RoyaltyPolicyID  string   `json:"royalty_policy_id"`
+}
+
+// BuyNFTResponse is returned after successful purchase
+type BuyNFTResponse struct {
+	TxHash string `json:"tx_hash"`
+}
+
+// BuyNFT calls the sidecar to purchase a listed NFT
+func (c *Client) BuyNFT(req BuyNFTRequest) (*BuyNFTResponse, error) {
+	resp, err := c.post("/api/marketplace/buy", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result BuyNFTResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode buy response: %w", err)
+	}
+	return &result, nil
+}
+
+// CancelListingRequest is sent to the sidecar to cancel a listing
+type CancelListingRequest struct {
+	Mnemonic         []string `json:"mnemonic"`
+	ListingUTxOHash  string   `json:"listing_utxo_hash"`
+	ListingUTxOIndex string   `json:"listing_utxo_index"`
+	NFTUnit          string   `json:"nft_unit"`
+}
+
+// CancelListingResponse is returned after successful cancellation
+type CancelListingResponse struct {
+	TxHash string `json:"tx_hash"`
+}
+
+// CancelListing calls the sidecar to cancel a marketplace listing
+func (c *Client) CancelListing(req CancelListingRequest) (*CancelListingResponse, error) {
+	resp, err := c.post("/api/marketplace/cancel", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result CancelListingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode cancel response: %w", err)
+	}
 	return &result, nil
 }
 
 // ─── Wallet ───────────────────────────────────────────────────────────────────
 
-// GenerateWalletResponse is the response from /api/wallet/generate
 type GenerateWalletResponse struct {
 	Mnemonic []string `json:"mnemonic"`
 	Address  string   `json:"address"`
 }
 
-// GenerateWallet calls the blockchain sidecar to generate a new custodial wallet
 func (c *Client) GenerateWallet() (*GenerateWalletResponse, error) {
 	resp, err := c.post("/api/wallet/generate", nil)
 	if err != nil {
@@ -137,14 +212,11 @@ func (c *Client) GenerateWallet() (*GenerateWalletResponse, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode wallet response: %w", err)
 	}
-
 	return &result, nil
 }
 
 // ─── HTTP Helper ──────────────────────────────────────────────────────────────
 
-// post sends a POST request to the blockchain sidecar
-// Automatically adds the shared secret header for authentication
 func (c *Client) post(path string, body interface{}) (*http.Response, error) {
 	var reqBody io.Reader
 

@@ -29,6 +29,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/browse',
+      name: 'browse',
+      component: () => import('@/views/BrowseMintsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/nft/:id',
       name: 'nft-detail',
       component: () => import('@/views/NFTDetailView.vue'),

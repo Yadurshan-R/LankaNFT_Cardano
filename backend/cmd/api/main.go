@@ -11,6 +11,7 @@ import (
 	"NFT_Minting_Platform/internal/auth"
 	"NFT_Minting_Platform/internal/batch"
 	"NFT_Minting_Platform/internal/db"
+	"NFT_Minting_Platform/internal/listing"
 	"NFT_Minting_Platform/internal/middleware"
 	"NFT_Minting_Platform/internal/nft"
 )
@@ -72,6 +73,10 @@ func main() {
 		// Batch NFT minting routes
 		batchHandler := batch.NewHandler(db.DB)
 		batchHandler.RegisterRoutes(protected)
+
+		// Marketplace listing routes
+		listingHandler := listing.NewHandler(db.DB)
+		listingHandler.RegisterRoutes(protected)
 	}
 
 	port := os.Getenv("PORT")

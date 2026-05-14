@@ -40,10 +40,37 @@
           v-if="nft.tx_hash"
           :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
           target="_blank"
+          rel="noopener noreferrer"
           class="cardanoscan-btn"
         >
           View Transaction on Cardanoscan →
         </a>
+
+        <!-- List for Sale -->
+        <div v-if="nft.status === 'minted'" class="list-section">
+          <div v-if="!showListForm" >
+            <button class="list-btn" @click="showListForm = true">
+              List for Sale
+            </button>
+          </div>
+          <div v-else class="list-form">
+            <input
+              v-model.number="listPrice"
+              type="number"
+              placeholder="Price in ADA"
+              class="price-input"
+              min="2"
+            />
+            <div class="list-actions">
+              <button class="btn-confirm" :disabled="listing" @click="handleList">
+                {{ listing ? 'Listing...' : 'Confirm Listing' }}
+              </button>
+              <button class="btn-cancel-list" @click="showListForm = false">Cancel</button>
+            </div>
+            <p v-if="listError" class="list-error">{{ listError }}</p>
+            <p v-if="listSuccess" class="list-success">{{ listSuccess }}</p>
+          </div>
+        </div>
       </div>
 
       <!-- Right: Info -->
@@ -115,6 +142,7 @@
           <a
             :href="nft.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')"
             target="_blank"
+            rel="noopener noreferrer"
             class="ipfs-link"
           >
             {{ nft.image }}
@@ -129,11 +157,18 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDashboardStore } from '@/stores/dashboard'
+import { createListing } from '@/services/listing'
 
 const route = useRoute()
 const dashboard = useDashboardStore()
 const loading = ref(true)
 const copied = ref<string | null>(null)
+
+const showListForm = ref(false)
+const listPrice = ref(10)
+const listing = ref(false)
+const listError = ref('')
+const listSuccess = ref('')
 
 // Find the NFT from the dashboard store
 // If not loaded yet, load the dashboard first
@@ -163,6 +198,26 @@ async function copy(text: string, key: string) {
   await navigator.clipboard.writeText(text)
   copied.value = key
   setTimeout(() => (copied.value = null), 2000)
+}
+
+async function handleList() {
+  if (!nft.value) return
+  if (listPrice.value < 2) {
+    listError.value = 'Minimum price is 2 ADA'
+    return
+  }
+  listing.value = true
+  listError.value = ''
+  try {
+    const priceLovelace = Math.floor(listPrice.value * 1_000_000)
+    await createListing(nft.value.id, priceLovelace)
+    listSuccess.value = 'NFT listed successfully!'
+    showListForm.value = false
+  } catch (err: any) {
+    listError.value = err.response?.data?.error || 'Failed to list NFT'
+  } finally {
+    listing.value = false
+  }
 }
 
 onMounted(async () => {
@@ -294,4 +349,35 @@ onMounted(async () => {
   font-family: monospace;
 }
 .ipfs-link:hover { text-decoration: underline; }
+
+/* Added Listing Styles */
+.list-section { margin-top: 16px; }
+.list-btn {
+  width: 100%; padding: 12px;
+  background: #1a1a1a; color: #fff;
+  border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.list-btn:hover { background: #333; }
+.list-form { display: flex; flex-direction: column; gap: 10px; }
+.price-input {
+  padding: 10px 12px; border: 1.5px solid #e0e0e0;
+  border-radius: 8px; font-size: 14px; outline: none;
+}
+.price-input:focus { border-color: #534AB7; }
+.list-actions { display: flex; gap: 8px; }
+.btn-confirm {
+  flex: 1; padding: 10px;
+  background: #534AB7; color: #fff;
+  border: none; border-radius: 8px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.btn-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-cancel-list {
+  padding: 10px 16px; background: #f5f5f5;
+  border: none; border-radius: 8px;
+  font-size: 14px; cursor: pointer;
+}
+.list-error { color: #d32f2f; font-size: 13px; margin: 0; }
+.list-success { color: #085041; font-size: 13px; margin: 0; }
 </style>
