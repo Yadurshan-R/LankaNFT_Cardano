@@ -27,15 +27,19 @@ const router = createRouter({
       name: 'batch-mint',
       component: () => import('@/views/BatchMintView.vue'),
       meta: { requiresAuth: true },
-  },
+    },
+    {
+      path: '/nft/:id',
+      name: 'nft-detail',
+      component: () => import('@/views/NFTDetailView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
-// Route guard — runs before every navigation
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
-  // Only check auth once — if already determined, skip the API call
   if (!auth.isAuthenticated && !auth.checked) {
     await auth.checkAuth()
   }
