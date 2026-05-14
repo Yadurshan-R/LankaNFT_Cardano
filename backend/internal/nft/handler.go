@@ -1,9 +1,12 @@
 package nft
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"NFT_Minting_Platform/pkg/blockchain"
@@ -33,23 +36,21 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 		nft.POST("/mint", h.MintNFT)
 		nft.GET("/my-nfts", h.GetMyNFTs)
 		nft.GET("/wallet", h.GetWallet)
+		nft.GET("/stats", h.GetStats)
+		nft.GET("/balance", h.GetWalletBalance)
 	}
 }
 
 // PrepareMint godoc
 // POST /api/nft/prepare-mint
-// Multipart form: file + metadata fields
-// Uploads to IPFS, stores in DB, returns mint params for blockchain
 func (h *Handler) PrepareMint(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	// Parse multipart form (max 100MB)
 	if err := c.Request.ParseMultipartForm(100 << 20); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse form"})
 		return
 	}
 
-	// Get uploaded file
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
@@ -57,32 +58,27 @@ func (h *Handler) PrepareMint(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Read file bytes
 	fileData, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
 		return
 	}
 
-	// Parse royalties
 	royalties, _ := strconv.ParseFloat(c.PostForm("royalties"), 64)
 	if royalties < 0 || royalties > 100 {
 		royalties = 0
 	}
 
-	// Parse total supply
 	totalSupply, _ := strconv.Atoi(c.PostForm("total_supply"))
 	if totalSupply < 1 {
 		totalSupply = 1
 	}
 
-	// Parse privacy
 	privacy := c.PostForm("privacy")
 	if privacy != "private" {
 		privacy = "public"
 	}
 
-	// Build mint request
 	req := MintRequest{
 		OwnerID:     userID,
 		Name:        c.PostForm("name"),
@@ -92,7 +88,7 @@ func (h *Handler) PrepareMint(c *gin.Context) {
 		Privacy:     privacy,
 		ImageData:   fileData,
 		ImageName:   header.Filename,
-		Attributes:  map[string]string{}, // TODO: parse from form
+		Attributes:  map[string]string{},
 	}
 
 	if req.Name == "" {
@@ -100,7 +96,6 @@ func (h *Handler) PrepareMint(c *gin.Context) {
 		return
 	}
 
-	// Upload to IPFS + store in DB
 	result, err := h.service.PrepareMint(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -118,8 +113,6 @@ func (h *Handler) PrepareMint(c *gin.Context) {
 
 // MintNFT godoc
 // POST /api/nft/mint
-// Calls blockchain sidecar to mint the NFT on-chain
-// Body: { "nft_id": "uuid" }
 func (h *Handler) MintNFT(c *gin.Context) {
 	userID := c.GetString("user_id")
 	var body struct {
@@ -130,7 +123,6 @@ func (h *Handler) MintNFT(c *gin.Context) {
 		return
 	}
 
-	// Get NFT details from DB
 	var assetName, metadataIPFS, imageIPFS string
 	var royalties float64
 	err := h.service.db.QueryRow(c.Request.Context(), `
@@ -142,7 +134,6 @@ func (h *Handler) MintNFT(c *gin.Context) {
 		return
 	}
 
-	// Get and decrypt custodial wallet
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
 		log.Printf("GetWalletForUser error for user %s: %v", userID, err)
@@ -150,7 +141,6 @@ func (h *Handler) MintNFT(c *gin.Context) {
 		return
 	}
 
-	// Call blockchain sidecar to mint
 	mintResult, err := h.service.blockchainClient.MintNFT(blockchain.MintNFTRequest{
 		Mnemonic:     mnemonic,
 		AssetName:    assetName,
@@ -163,7 +153,6 @@ func (h *Handler) MintNFT(c *gin.Context) {
 		return
 	}
 
-	// Update NFT status in DB
 	err = h.service.UpdateMintStatus(
 		c.Request.Context(),
 		body.NFTID,
@@ -185,8 +174,6 @@ func (h *Handler) MintNFT(c *gin.Context) {
 
 // ConfirmMint godoc
 // POST /api/nft/confirm-mint
-// Called after blockchain tx is submitted
-// Updates NFT status to 'minted' with tx hash
 func (h *Handler) ConfirmMint(c *gin.Context) {
 	var body struct {
 		NFTID    string `json:"nft_id" binding:"required"`
@@ -248,5 +235,81 @@ func (h *Handler) GetMyNFTs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"nfts":  nfts,
 		"count": len(nfts),
+	})
+}
+
+// GetStats godoc
+// GET /api/nft/stats
+// Returns NFT statistics for the authenticated user
+func (h *Handler) GetStats(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	stats, err := h.service.GetUserStats(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch stats"})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+// GetWalletBalance godoc
+// GET /api/nft/balance
+// Returns the tADA balance of the user's custodial wallet from Blockfrost
+func (h *Handler) GetWalletBalance(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	// Get wallet address
+	_, address, err := h.service.GetWalletForUser(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
+		return
+	}
+
+	// Fetch balance from Blockfrost
+	blockfrostURL := os.Getenv("BLOCKFROST_BASE_URL")
+	blockfrostKey := os.Getenv("BLOCKFROST_PROJECT_ID")
+
+	url := fmt.Sprintf("%s/addresses/%s", blockfrostURL, address)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create request"})
+		return
+	}
+	req.Header.Set("project_id", blockfrostKey)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch balance"})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Parse Blockfrost response
+	var bf struct {
+		Amount []struct {
+			Unit     string `json:"unit"`
+			Quantity string `json:"quantity"`
+		} `json:"amount"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&bf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse balance"})
+		return
+	}
+
+	// Find lovelace amount
+	lovelace := "0"
+	for _, a := range bf.Amount {
+		if a.Unit == "lovelace" {
+			lovelace = a.Quantity
+			break
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"wallet_address": address,
+		"lovelace":       lovelace,
 	})
 }

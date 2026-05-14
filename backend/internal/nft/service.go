@@ -256,3 +256,24 @@ func sanitizeAssetName(name string) string {
 	}
 	return s
 }
+
+// GetUserStats returns NFT statistics for a user
+func (s *Service) GetUserStats(ctx context.Context, ownerID string) (map[string]interface{}, error) {
+	var total, minted, pending int
+	err := s.db.QueryRow(ctx, `
+        SELECT
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE status = 'minted') as minted,
+            COUNT(*) FILTER (WHERE status = 'pending') as pending
+        FROM nfts
+        WHERE owner_id = $1
+    `, ownerID).Scan(&total, &minted, &pending)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"total":   total,
+		"minted":  minted,
+		"pending": pending,
+	}, nil
+}
