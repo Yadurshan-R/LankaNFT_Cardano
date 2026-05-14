@@ -1,16 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// internal/listing/handler.go
-//
-// Marketplace HTTP Handler
-//
-// Routes:
-//   POST /api/listing/create   — list an NFT for sale
-//   POST /api/listing/buy      — purchase a listed NFT
-//   POST /api/listing/cancel   — cancel a listing
-//   GET  /api/listing/all      — get all active listings
-//   GET  /api/listing/mine     — get caller's active listings
-// ─────────────────────────────────────────────────────────────────────────────
-
 package listing
 
 import (
@@ -25,17 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Handler holds the listing service
 type Handler struct {
 	service *Service
 }
 
-// NewHandler creates a new listing handler
 func NewHandler(db *pgxpool.Pool) *Handler {
 	return &Handler{service: NewService(db)}
 }
 
-// RegisterRoutes registers all listing routes
 func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 	l := protected.Group("/listing")
 	{
@@ -47,10 +31,6 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 	}
 }
 
-// CreateListing godoc
-// POST /api/listing/create
-// Lists an NFT for sale on the marketplace
-// Body: { nft_id, price_lovelace }
 func (h *Handler) CreateListing(c *gin.Context) {
 	userID := c.GetString("user_id")
 
@@ -64,13 +44,11 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		return
 	}
 
-	// Minimum price 2 ADA
 	if body.PriceLovelace < 2_000_000 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "minimum price is 2 ADA (2000000 lovelace)"})
 		return
 	}
 
-	// Get NFT details from DB
 	var policyID, assetName, userTokenName string
 	err := h.service.db.QueryRow(c.Request.Context(), `
         SELECT policy_id, asset_name, user_token_name
@@ -82,25 +60,17 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		return
 	}
 
-	// Get royalty policy ID from the royalty NFT associated with this policy
-	// For now we use the same policy ID — single NFTs use their own policy
 	royaltyPolicyID := policyID
 
-	// Get custodial wallet
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
 		return
 	}
 
-	// DB stores "001bc280" + rawName, but on-chain it is "001bc280" + hex(rawName)
-	// MeshSDK needs the full hex unit to find the UTxO
-	tokenPrefix := userTokenName[:8]               // "001bc280"
-	rawName := userTokenName[8:]                   // "aa"
-	nameHex := hex.EncodeToString([]byte(rawName)) // "6161"
-	nftUnit := policyID + tokenPrefix + nameHex
+	// DB stores "001bc280" + rawName, on-chain is "001bc280" + hex(rawName)
+	nftUnit := buildNFTUnit(policyID, userTokenName)
 
-	// Call blockchain sidecar to build and submit listing tx
 	result, err := h.service.blockchainClient.ListNFT(blockchain.ListNFTRequest{
 		Mnemonic:        mnemonic,
 		NFTUnit:         nftUnit,
@@ -112,15 +82,12 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		return
 	}
 
-	// Store listing in DB
 	listingID, err := h.service.CreateListing(
 		c.Request.Context(),
-		body.NFTID,
-		userID,
+		body.NFTID, userID,
 		result.TxHash,
 		body.PriceLovelace,
-		policyID,
-		userTokenName,
+		policyID, userTokenName,
 		royaltyPolicyID,
 	)
 	if err != nil {
@@ -136,16 +103,10 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		"tx_hash":             result.TxHash,
 		"marketplace_address": result.MarketplaceAddress,
 		"price_lovelace":      body.PriceLovelace,
-		"cardanoscan": fmt.Sprintf(
-			"https://preprod.cardanoscan.io/transaction/%s", result.TxHash,
-		),
+		"cardanoscan":         fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", result.TxHash),
 	})
 }
 
-// BuyListing godoc
-// POST /api/listing/buy
-// Purchase a listed NFT
-// Body: { listing_id }
 func (h *Handler) BuyListing(c *gin.Context) {
 	userID := c.GetString("user_id")
 
@@ -157,7 +118,6 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		return
 	}
 
-	// Get listing details
 	var listingTxHash, scriptUTxO, sellerID string
 	var nftPolicyID, nftAssetName, royaltyPolicyID string
 	var priceLovelace int64
@@ -178,37 +138,35 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		return
 	}
 
-	// Prevent buying your own listing
 	if sellerID == userID {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot buy your own listing"})
 		return
 	}
 
-	// Get buyer wallet
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
 		return
 	}
 
-	// Get seller address for payment
 	_, sellerAddress, err := h.service.GetWalletForUser(c.Request.Context(), sellerID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get seller address"})
 		return
 	}
 
-	// Parse script UTxO
 	utxoParts := splitUTxO(scriptUTxO)
 
-	// Call blockchain sidecar to buy
+	// Fix: apply hex encoding to asset name for on-chain unit
+	nftUnit := buildNFTUnit(nftPolicyID, nftAssetName)
+
 	result, err := h.service.blockchainClient.BuyNFT(blockchain.BuyNFTRequest{
 		Mnemonic:         mnemonic,
 		ListingUTxOHash:  utxoParts[0],
 		ListingUTxOIndex: utxoParts[1],
 		SellerAddress:    sellerAddress,
 		PriceLovelace:    priceLovelace,
-		NFTUnit:          nftPolicyID + nftAssetName,
+		NFTUnit:          nftUnit,
 		RoyaltyPolicyID:  royaltyPolicyID,
 	})
 	if err != nil {
@@ -216,28 +174,20 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		return
 	}
 
-	// Mark listing as sold
 	h.service.MarkListingSold(c.Request.Context(), body.ListingID, result.TxHash, userID)
 
-	// Transfer NFT ownership in DB
 	h.service.db.Exec(c.Request.Context(), `
         UPDATE nfts SET owner_id = $1, status = 'minted', updated_at = NOW()
-        WHERE policy_id = $2 AND asset_name = $3
+        WHERE policy_id = $2 AND user_token_name = $3
     `, userID, nftPolicyID, nftAssetName)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "NFT purchased successfully",
-		"tx_hash": result.TxHash,
-		"cardanoscan": fmt.Sprintf(
-			"https://preprod.cardanoscan.io/transaction/%s", result.TxHash,
-		),
+		"message":     "NFT purchased successfully",
+		"tx_hash":     result.TxHash,
+		"cardanoscan": fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", result.TxHash),
 	})
 }
 
-// CancelListing godoc
-// POST /api/listing/cancel
-// Cancel a listing and reclaim NFT
-// Body: { listing_id }
 func (h *Handler) CancelListing(c *gin.Context) {
 	userID := c.GetString("user_id")
 
@@ -249,7 +199,6 @@ func (h *Handler) CancelListing(c *gin.Context) {
 		return
 	}
 
-	// Get listing — verify seller owns it
 	var scriptUTxO, nftPolicyID, nftAssetName string
 	err := h.service.db.QueryRow(c.Request.Context(), `
         SELECT script_utxo, nft_policy_id, nft_asset_name
@@ -269,11 +218,14 @@ func (h *Handler) CancelListing(c *gin.Context) {
 
 	utxoParts := splitUTxO(scriptUTxO)
 
+	// Fix: apply hex encoding to asset name for on-chain unit
+	nftUnit := buildNFTUnit(nftPolicyID, nftAssetName)
+
 	result, err := h.service.blockchainClient.CancelListing(blockchain.CancelListingRequest{
 		Mnemonic:         mnemonic,
 		ListingUTxOHash:  utxoParts[0],
 		ListingUTxOIndex: utxoParts[1],
-		NFTUnit:          nftPolicyID + nftAssetName,
+		NFTUnit:          nftUnit,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to cancel listing: " + err.Error()})
@@ -288,8 +240,6 @@ func (h *Handler) CancelListing(c *gin.Context) {
 	})
 }
 
-// GetAllListings godoc
-// GET /api/listing/all
 func (h *Handler) GetAllListings(c *gin.Context) {
 	listings, err := h.service.GetActiveListings(c.Request.Context())
 	if err != nil {
@@ -299,8 +249,6 @@ func (h *Handler) GetAllListings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"listings": listings, "count": len(listings)})
 }
 
-// GetMyListings godoc
-// GET /api/listing/mine
 func (h *Handler) GetMyListings(c *gin.Context) {
 	userID := c.GetString("user_id")
 
@@ -350,7 +298,20 @@ func (h *Handler) GetMyListings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"listings": listings, "count": len(listings)})
 }
 
-// splitUTxO splits "txHash#index" into ["txHash", "index"]
+// buildNFTUnit converts DB token name to on-chain hex unit
+// DB stores: policyID + "001bc280" + rawName (e.g. "aa")
+// On-chain:  policyID + "001bc280" + hex(rawName) (e.g. "6161")
+func buildNFTUnit(policyID, tokenName string) string {
+	if len(tokenName) < 8 {
+		return policyID + tokenName
+	}
+	prefix := tokenName[:8]                    // "001bc280"
+	raw := tokenName[8:]                       // "aa"
+	encoded := hex.EncodeToString([]byte(raw)) // "6161"
+	return policyID + prefix + encoded
+}
+
+// splitUTxO splits "txHash#index" into [txHash, index]
 func splitUTxO(utxo string) [2]string {
 	for i := len(utxo) - 1; i >= 0; i-- {
 		if utxo[i] == '#' {

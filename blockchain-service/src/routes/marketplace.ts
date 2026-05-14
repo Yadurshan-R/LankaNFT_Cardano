@@ -1,16 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // blockchain-service/src/routes/marketplace.ts
-//
-// Marketplace Transaction Builder — CIP-102 Compliant
-//
-// Handles three marketplace actions:
-//   List   — locks NFT at marketplace script address with ListingDatum
-//   Buy    — pays seller + royalty, sends NFT to buyer
-//   Cancel — returns NFT to seller
-//
-// The marketplace validator reads the CIP-102 royalty datum on-chain
-// from a reference input. Off-chain we calculate the royalty amount
-// and include the royalty UTxO as a reference input in the buy tx.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, Request, Response } from "express";
@@ -18,15 +7,13 @@ import {
   BlockfrostProvider,
   MeshTxBuilder,
   MeshWallet,
-  SpendingBlueprint,
   applyCborEncoding,
+  deserializeAddress,
   mConStr0,
   mConStr1,
   resolvePaymentKeyHash,
-  serializeAddressObj,
   serializeData,
   serializePlutusScript,
-  stringToHex,
 } from "@meshsdk/core";
 import config from "../config";
 import fs from "fs";
@@ -34,7 +21,6 @@ import path from "path";
 
 const router = Router();
 
-// ─── Load Blueprint ───────────────────────────────────────────────────────────
 const blueprintPath = path.join(__dirname, "../../plutus.json");
 const blueprintJson = JSON.parse(fs.readFileSync(blueprintPath, "utf-8"));
 
@@ -46,22 +32,14 @@ function getValidator(title: string) {
 
 const marketplaceValidator = getValidator("marketplace.marketplace.spend");
 
-// ─── Marketplace Script Address ───────────────────────────────────────────────
 const marketplaceAddress = serializePlutusScript(
-  {
-    code: applyCborEncoding(marketplaceValidator.compiledCode),
-    version: "V3",
-  },
+  { code: applyCborEncoding(marketplaceValidator.compiledCode), version: "V3" },
   undefined,
   0
 ).address;
 
 console.log("✅ Marketplace address:", marketplaceAddress);
 
-// ─── Build ListingDatum ───────────────────────────────────────────────────────
-// Mirrors the Aiken ListingDatum type exactly:
-// ListingDatum { seller, seller_address, price, nft_policy_id,
-//                nft_asset_name, royalty_policy_id }
 function buildListingDatum(
   sellerAddress: string,
   priceLovelace: number,
@@ -70,46 +48,48 @@ function buildListingDatum(
   royaltyPolicyId: string
 ): string {
   const sellerPkh = resolvePaymentKeyHash(sellerAddress);
-
-  // Build seller address as Plutus Address type
-  // ConStr0([ConStr0([pubKeyHash]), ConStr1([])])  = PubKey address no staking
-  const plutusSellerAddress = mConStr0([
-    mConStr0([sellerPkh]),
-    mConStr1([]),
-  ]);
-
+  
+  // Deserialize address to get staking credential
+  const addrObj = deserializeAddress(sellerAddress);
+  
+  // Build correct Plutus Address type including staking credential
+  // Cardano Address = Constr 0 [paymentCred, Option<StakingCred>]
+  // With staking:    Constr 0 [Constr 0 [pkh], Constr 0 [Constr 0 [Constr 0 [stakePkh]]]]
+  // Without staking: Constr 0 [Constr 0 [pkh], Constr 1 []]
+  let plutusSellerAddress;
+  
+  if (addrObj.stakeCredentialHash) {
+    plutusSellerAddress = mConStr0([
+      mConStr0([sellerPkh]),
+      mConStr0([
+        mConStr0([
+          mConStr0([addrObj.stakeCredentialHash])
+        ])
+      ])
+    ]);
+  } else {
+    plutusSellerAddress = mConStr0([
+      mConStr0([sellerPkh]),
+      mConStr1([])
+    ]);
+  }
+  
   const datum = mConStr0([
-    sellerPkh,            // seller: VerificationKeyHash
-    plutusSellerAddress,  // seller_address: Address
-    priceLovelace,        // price: Int
-    nftPolicyId,          // nft_policy_id: PolicyId
-    nftAssetName,         // nft_asset_name: ByteArray
-    royaltyPolicyId,      // royalty_policy_id: PolicyId
+    sellerPkh,
+    plutusSellerAddress,
+    priceLovelace,
+    nftPolicyId,
+    nftAssetName,
+    royaltyPolicyId,
   ]);
-
+  
   return serializeData(datum);
 }
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-
-/**
- * POST /api/marketplace/list
- * Lock an NFT at the marketplace script address for sale
- *
- * Body:
- *   mnemonic          string[]  — seller's custodial wallet mnemonic
- *   nft_unit          string    — full asset unit (policyId + assetNameHex)
- *   price_lovelace    number    — asking price in lovelace
- *   royalty_policy_id string    — policy ID of (500) royalty token
- */
+// ─── List ─────────────────────────────────────────────────────────────────────
 router.post("/list", async (req: Request, res: Response) => {
   try {
-    const {
-      mnemonic,
-      nft_unit,
-      price_lovelace,
-      royalty_policy_id = "",
-    } = req.body;
+    const { mnemonic, nft_unit, price_lovelace, royalty_policy_id = "" } = req.body;
 
     if (!mnemonic || !nft_unit || !price_lovelace) {
       res.status(400).json({ error: "mnemonic, nft_unit, price_lovelace required" });
@@ -131,12 +111,9 @@ router.post("/list", async (req: Request, res: Response) => {
     }
 
     const sellerAddress = await wallet.getChangeAddress();
-
-    // Parse nft_unit into policyId + assetName
     const policyId = nft_unit.slice(0, 56);
     const assetNameHex = nft_unit.slice(56);
 
-    // Build the listing datum
     const listingDatumCbor = buildListingDatum(
       sellerAddress,
       price_lovelace,
@@ -145,14 +122,12 @@ router.post("/list", async (req: Request, res: Response) => {
       royalty_policy_id
     );
 
-    // Build transaction — lock NFT at marketplace with datum
     const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
 
     const unsignedTx = await txBuilder
-      // Send NFT to marketplace script address with inline listing datum
       .txOut(marketplaceAddress, [
         { unit: nft_unit, quantity: "1" },
-        { unit: "lovelace", quantity: "2000000" }, // min ADA
+        { unit: "lovelace", quantity: "2000000" },
       ])
       .txOutInlineDatumValue(listingDatumCbor, "CBOR")
       .changeAddress(sellerAddress)
@@ -162,7 +137,6 @@ router.post("/list", async (req: Request, res: Response) => {
     const signedTx = await wallet.signTx(unsignedTx);
     const txHash = await wallet.submitTx(signedTx);
 
-    // Return the UTxO reference for the listing
     console.log(`✅ NFT listed — tx: ${txHash}, price: ${price_lovelace} lovelace`);
 
     res.json({
@@ -178,22 +152,7 @@ router.post("/list", async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/marketplace/buy
- * Purchase a listed NFT — pays seller + royalty
- *
- * Body:
- *   mnemonic          string[]  — buyer's mnemonic
- *   listing_utxo_hash string    — tx hash of the listing
- *   listing_utxo_index number   — output index of the listing
- *   seller_address    string    — seller's address (from listing datum)
- *   price_lovelace    number    — listing price
- *   nft_unit          string    — full asset unit
- *   royalty_amount    number    — calculated royalty in lovelace
- *   royalty_address   string    — royalty recipient address
- *   royalty_utxo_hash string    — tx hash of (500) royalty token UTxO
- *   royalty_utxo_index number   — output index of royalty UTxO
- */
+// ─── Buy ──────────────────────────────────────────────────────────────────────
 router.post("/buy", async (req: Request, res: Response) => {
   try {
     const {
@@ -225,44 +184,79 @@ router.post("/buy", async (req: Request, res: Response) => {
     const utxos = await wallet.getUtxos();
     const buyerAddress = await wallet.getChangeAddress();
 
-    // Parse NFT unit
-    const policyId = nft_unit.slice(0, 56);
-    const assetNameHex = nft_unit.slice(56);
+    // Find collateral UTxO — pure ADA, at least 5 ADA
+    // Required by Cardano protocol when spending Plutus V3 scripts
+    const collateralUtxo = utxos.find(
+      (u) =>
+        u.output.amount.length === 1 &&
+        u.output.amount[0].unit === "lovelace" &&
+        parseInt(u.output.amount[0].quantity) >= 5_000_000
+    );
 
-    // Seller receives price minus royalty
+    if (!collateralUtxo) {
+      res.status(400).json({
+        error:
+          "Buyer wallet needs a pure ADA UTxO of at least 5 ADA for collateral. " +
+          "Fund your wallet at https://docs.cardano.org/cardano-testnet/tools/faucet",
+      });
+      return;
+    }
+
+    // Fetch listing UTxO from marketplace script address
+    const scriptUtxos = await provider.fetchAddressUTxOs(marketplaceAddress);
+    const listingUtxo = scriptUtxos.find(
+      (u) =>
+        u.input.txHash === listing_utxo_hash &&
+        u.input.outputIndex === parseInt(listing_utxo_index.toString())
+    );
+
+    if (!listingUtxo) {
+      res.status(404).json({
+        error: `Listing UTxO not found. TX: ${listing_utxo_hash}#${listing_utxo_index}`,
+      });
+      return;
+    }
+
     const sellerAmount = price_lovelace - royalty_amount;
-
-    // Buy redeemer = ConStr1([]) = Buy constructor (index 1, no fields)
-    const buyRedeemer = serializeData(mConStr1([]));
-
-    // Build the marketplace script for spending
     const marketplaceScript = applyCborEncoding(marketplaceValidator.compiledCode);
+
+    console.log("Buy — listing UTxO found:", {
+      hash: listingUtxo.input.txHash,
+      index: listingUtxo.input.outputIndex,
+      nft_unit,
+      sellerAmount,
+      collateral: collateralUtxo.input.txHash,
+    });
 
     const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
 
-    // Start building buy transaction
     txBuilder
-      // Spend the listing UTxO from marketplace script
       .spendingPlutusScriptV3()
-      .txIn(listing_utxo_hash, listing_utxo_index)
+      .txIn(
+        listingUtxo.input.txHash,
+        listingUtxo.input.outputIndex,
+        listingUtxo.output.amount,
+        listingUtxo.output.address
+      )
       .txInInlineDatumPresent()
-      .txInRedeemerValue(buyRedeemer, "CBOR")
-      .spendingTxInReference(listing_utxo_hash, listing_utxo_index)
-
-      // NFT goes to buyer
+      .txInRedeemerValue("d87980", "CBOR")
+      .txInScript(marketplaceScript)
+      .txInCollateral(
+        collateralUtxo.input.txHash,
+        collateralUtxo.input.outputIndex,
+        collateralUtxo.output.amount,
+        collateralUtxo.output.address
+      )
+      .requiredSignerHash(resolvePaymentKeyHash(buyerAddress))
       .txOut(buyerAddress, [{ unit: nft_unit, quantity: "1" }])
-
-      // Seller receives their net amount
       .txOut(seller_address, [{ unit: "lovelace", quantity: sellerAmount.toString() }]);
 
-    // Pay royalty if applicable
     if (royalty_amount > 0 && royalty_address) {
       txBuilder.txOut(royalty_address, [
         { unit: "lovelace", quantity: royalty_amount.toString() },
       ]);
     }
 
-    // Include royalty UTxO as reference input for on-chain CIP-102 verification
     if (royalty_utxo_hash) {
       txBuilder.readOnlyTxInReference(royalty_utxo_hash, royalty_utxo_index);
     }
@@ -276,8 +270,8 @@ router.post("/buy", async (req: Request, res: Response) => {
     const txHash = await wallet.submitTx(signedTx);
 
     console.log(`✅ NFT purchased — tx: ${txHash}`);
-
     res.json({ tx_hash: txHash });
+
   } catch (error: any) {
     const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
     console.error("Buy error:", message);
@@ -285,16 +279,7 @@ router.post("/buy", async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /api/marketplace/cancel
- * Cancel a listing — returns NFT to seller
- *
- * Body:
- *   mnemonic          string[]  — seller's mnemonic
- *   listing_utxo_hash string    — tx hash of the listing
- *   listing_utxo_index number   — output index
- *   nft_unit          string    — full asset unit
- */
+// ─── Cancel ───────────────────────────────────────────────────────────────────
 router.post("/cancel", async (req: Request, res: Response) => {
   try {
     const { mnemonic, listing_utxo_hash, listing_utxo_index, nft_unit } = req.body;
@@ -315,22 +300,54 @@ router.post("/cancel", async (req: Request, res: Response) => {
     const utxos = await wallet.getUtxos();
     const sellerAddress = await wallet.getChangeAddress();
 
-    // Cancel redeemer = ConStr0([]) = Cancel constructor (index 0, no fields)
-    const cancelRedeemer = serializeData(mConStr0([]));
+    // Find collateral UTxO — pure ADA, at least 5 ADA
+    const collateralUtxo = utxos.find(
+      (u) =>
+        u.output.amount.length === 1 &&
+        u.output.amount[0].unit === "lovelace" &&
+        parseInt(u.output.amount[0].quantity) >= 5_000_000
+    );
 
+    if (!collateralUtxo) {
+      res.status(400).json({
+        error: "Wallet needs a pure ADA UTxO of at least 5 ADA for collateral",
+      });
+      return;
+    }
+
+    const scriptUtxos = await provider.fetchAddressUTxOs(marketplaceAddress);
+    const listingUtxo = scriptUtxos.find(
+      (u) =>
+        u.input.txHash === listing_utxo_hash &&
+        u.input.outputIndex === parseInt(listing_utxo_index.toString())
+    );
+
+    if (!listingUtxo) {
+      res.status(404).json({ error: "Listing UTxO not found — already sold or cancelled" });
+      return;
+    }
+
+    const marketplaceScript = applyCborEncoding(marketplaceValidator.compiledCode);
     const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
 
     const unsignedTx = await txBuilder
-      // Spend listing UTxO with Cancel redeemer
       .spendingPlutusScriptV3()
-      .txIn(listing_utxo_hash, listing_utxo_index)
+      .txIn(
+        listingUtxo.input.txHash,
+        listingUtxo.input.outputIndex,
+        listingUtxo.output.amount,
+        listingUtxo.output.address
+      )
       .txInInlineDatumPresent()
-      .txInRedeemerValue(cancelRedeemer, "CBOR")
-      .spendingTxInReference(listing_utxo_hash, listing_utxo_index)
-
-      // NFT returns to seller
+      .txInRedeemerValue("d87a80", "CBOR")
+      .txInScript(marketplaceScript)
+      .txInCollateral(
+        collateralUtxo.input.txHash,
+        collateralUtxo.input.outputIndex,
+        collateralUtxo.output.amount,
+        collateralUtxo.output.address
+      )
       .txOut(sellerAddress, [{ unit: nft_unit, quantity: "1" }])
-
       .changeAddress(sellerAddress)
       .selectUtxosFrom(utxos)
       .requiredSignerHash(resolvePaymentKeyHash(sellerAddress))
@@ -340,8 +357,8 @@ router.post("/cancel", async (req: Request, res: Response) => {
     const txHash = await wallet.submitTx(signedTx);
 
     console.log(`✅ Listing cancelled — tx: ${txHash}`);
-
     res.json({ tx_hash: txHash });
+
   } catch (error: any) {
     const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
     console.error("Cancel error:", message);
