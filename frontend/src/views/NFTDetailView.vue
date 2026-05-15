@@ -26,28 +26,22 @@
 
     <!-- Detail -->
     <div v-else class="detail-content">
-      <!-- Left: Image -->
+      <!-- Left: Image + Actions -->
       <div class="detail-left">
         <div class="detail-image-wrap">
-          <img
-            v-if="imageUrl"
-            :src="imageUrl"
-            :alt="nft.name"
-            class="detail-image"
-          />
+          <img v-if="imageUrl" :src="imageUrl" :alt="nft.name" class="detail-image" />
           <div v-else class="detail-image-placeholder">
             <ImageIcon :size="64" color="#ccc" />
           </div>
-
           <div :class="['status-badge', `status-badge--${nft.status}`]">
             {{ nft.status }}
           </div>
           <div v-if="nft.privacy === 'private'" class="privacy-badge">
-            <Lock :size="12" color="#fff" />
-            Private
+            <Lock :size="12" color="#fff" /> Private
           </div>
         </div>
 
+        <!-- View on Cardanoscan — only shown after minting is confirmed -->
         <a
           v-if="nft.tx_hash"
           :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
@@ -58,31 +52,72 @@
           View Transaction on Cardanoscan →
         </a>
 
-        <!-- List for Sale -->
+        <!-- ── Listing Section ─────────────────────────────────────── -->
+        <!-- Only shown for minted NFTs that are not already listed -->
         <div v-if="nft.status === 'minted'" class="list-section">
-          <div v-if="!showListForm">
-            <button class="list-btn" @click="showListForm = true">
-              <Tag :size="14" /> List for Sale
-            </button>
-          </div>
-          <div v-else class="list-form">
-            <input
-              v-model.number="listPrice"
-              type="number"
-              placeholder="Price in ADA"
-              class="price-input"
-              min="2"
-            />
-            <div class="list-actions">
-              <button class="btn-confirm" :disabled="listing" @click="handleList">
-                <Loader2 v-if="listing" :size="14" class="spin" />
-                {{ listing ? 'Listing...' : 'Confirm Listing' }}
-              </button>
-              <button class="btn-cancel-list" @click="showListForm = false">Cancel</button>
+
+          <!-- Success state — shown after successful listing -->
+          <div v-if="listingConfirmed" class="listing-confirmed">
+            <div class="confirmed-header">
+              <CheckCircle :size="20" color="#085041" />
+              <span>Listed Successfully!</span>
             </div>
-            <p v-if="listError" class="list-error">{{ listError }}</p>
-            <p v-if="listSuccess" class="list-success">{{ listSuccess }}</p>
+            <div class="confirmed-details">
+              <div class="confirmed-row">
+                <span>Price</span>
+                <strong>{{ listPrice }} ADA</strong>
+              </div>
+              <div class="confirmed-row">
+                <span>Transaction</span>
+                <a
+                  :href="`https://preprod.cardanoscan.io/transaction/${listingTxHash}`"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="confirmed-link"
+                >
+                  View on Cardanoscan →
+                </a>
+              </div>
+            </div>
+            <!-- Allow relisting only after explicit cancel — not from here -->
+            <p class="confirmed-note">
+              Your NFT is now visible in Browse Mints.
+            </p>
           </div>
+
+          <!-- List form — shown when not yet listed -->
+          <div v-else>
+            <div v-if="!showListForm">
+              <button class="list-btn" @click="showListForm = true">
+                <Tag :size="14" /> List for Sale
+              </button>
+            </div>
+            <div v-else class="list-form">
+              <label class="price-label">Price in ADA</label>
+              <input
+                v-model.number="listPrice"
+                type="number"
+                placeholder="e.g. 10"
+                class="price-input"
+                min="2"
+              />
+              <p class="price-hint">Minimum 2 ADA · You receive sale price minus royalties</p>
+              <div class="list-actions">
+                <button class="btn-confirm" :disabled="listing" @click="handleList">
+                  <Loader2 v-if="listing" :size="14" class="spin" />
+                  {{ listing ? 'Submitting...' : 'Confirm Listing' }}
+                </button>
+                <button class="btn-cancel-list" @click="showListForm = false">Cancel</button>
+              </div>
+              <p v-if="listError" class="list-error">{{ listError }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Already listed state -->
+        <div v-if="nft.status === 'listed'" class="already-listed">
+          <Store :size="16" color="#534AB7" />
+          <span>This NFT is currently listed for sale in the marketplace.</span>
         </div>
       </div>
 
@@ -91,6 +126,7 @@
         <h1 class="detail-name">{{ nft.name }}</h1>
         <p v-if="nft.description" class="detail-desc">{{ nft.description }}</p>
 
+        <!-- Details table -->
         <div class="detail-section">
           <h3 class="detail-section-title">Details</h3>
           <div class="detail-rows">
@@ -113,6 +149,7 @@
           </div>
         </div>
 
+        <!-- Policy ID — unique identifier for this NFT's minting policy -->
         <div v-if="nft.policy_id" class="detail-section">
           <h3 class="detail-section-title">Policy ID</h3>
           <div class="copy-row">
@@ -124,6 +161,7 @@
           </div>
         </div>
 
+        <!-- Asset Name — CIP-68 token name stored on-chain -->
         <div class="detail-section">
           <h3 class="detail-section-title">Asset Name</h3>
           <div class="copy-row">
@@ -135,6 +173,7 @@
           </div>
         </div>
 
+        <!-- Transaction Hash — the Cardano tx that minted this NFT -->
         <div v-if="nft.tx_hash" class="detail-section">
           <h3 class="detail-section-title">Transaction Hash</h3>
           <div class="copy-row">
@@ -146,6 +185,7 @@
           </div>
         </div>
 
+        <!-- IPFS URI — where the NFT image is permanently stored -->
         <div v-if="nft.image" class="detail-section">
           <h3 class="detail-section-title">IPFS Image</h3>
           <a
@@ -168,10 +208,12 @@ import { useRoute } from 'vue-router'
 import {
   ArrowLeft,
   Check,
+  CheckCircle,
   Copy,
   Image as ImageIcon,
   Loader2,
   Lock,
+  Store,
   Tag,
 } from 'lucide-vue-next'
 import { useDashboardStore } from '@/stores/dashboard'
@@ -179,18 +221,27 @@ import { createListing } from '@/services/listing'
 
 const route = useRoute()
 const dashboard = useDashboardStore()
+
+// UI state
 const loading = ref(true)
 const copied = ref<string | null>(null)
+
+// Listing form state
 const showListForm = ref(false)
 const listPrice = ref(10)
 const listing = ref(false)
 const listError = ref('')
-const listSuccess = ref('')
 
+// Post-listing confirmation state
+const listingConfirmed = ref(false)
+const listingTxHash = ref('')
+
+// Find the NFT from the store by URL param
 const nft = computed(() =>
   dashboard.nfts.find((n) => n.id === route.params.id)
 )
 
+// Convert IPFS URI to a gateway URL for image display
 const imageUrl = computed(() => {
   if (!nft.value?.image) return null
   if (nft.value.image.startsWith('ipfs://')) {
@@ -199,6 +250,7 @@ const imageUrl = computed(() => {
   return nft.value.image
 })
 
+// Human-readable mint date
 const formattedDate = computed(() => {
   if (!nft.value?.created_at) return '—'
   return new Date(nft.value.created_at).toLocaleDateString('en-US', {
@@ -206,22 +258,39 @@ const formattedDate = computed(() => {
   })
 })
 
+// Copy text to clipboard and show a temporary checkmark
 async function copy(text: string, key: string) {
   await navigator.clipboard.writeText(text)
   copied.value = key
   setTimeout(() => (copied.value = null), 2000)
 }
 
+// Handle listing form submission
 async function handleList() {
   if (!nft.value) return
-  if (listPrice.value < 2) { listError.value = 'Minimum price is 2 ADA'; return }
+
+  // Client-side validation before hitting the API
+  if (listPrice.value < 2) {
+    listError.value = 'Minimum price is 2 ADA'
+    return
+  }
+
   listing.value = true
   listError.value = ''
+
   try {
-    await createListing(nft.value.id, Math.floor(listPrice.value * 1_000_000))
-    listSuccess.value = 'NFT listed successfully!'
+    const priceLovelace = Math.floor(listPrice.value * 1_000_000)
+    const result = await createListing(nft.value.id, priceLovelace)
+
+    // Show success confirmation with tx hash
+    listingTxHash.value = result.tx_hash
+    listingConfirmed.value = true
     showListForm.value = false
+
+    // Reload dashboard to update NFT status to 'listed'
+    await dashboard.loadDashboard()
   } catch (err: any) {
+    // Show the error from the backend (e.g. duplicate listing message)
     listError.value = err.response?.data?.error || 'Failed to list NFT'
   } finally {
     listing.value = false
@@ -229,6 +298,7 @@ async function handleList() {
 }
 
 onMounted(async () => {
+  // Load dashboard data if not already in store
   if (dashboard.nfts.length === 0) await dashboard.loadDashboard()
   loading.value = false
 })
@@ -236,36 +306,32 @@ onMounted(async () => {
 
 <style scoped>
 .nft-detail { max-width: 1000px; margin: 0 auto; padding: 32px; }
+
 .back-link {
   font-size: 13px; color: #666; text-decoration: none;
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-bottom: 24px;
+  display: inline-flex; align-items: center; gap: 4px; margin-bottom: 24px;
 }
 .back-link:hover { color: #534AB7; }
 
 .error-state { text-align: center; padding: 80px; color: #888; }
 
-/* Skeleton */
+/* ── Skeleton ─────────────────────────────────────────────── */
 .skeleton-left { display: flex; flex-direction: column; gap: 12px; }
 .skeleton-image {
   aspect-ratio: 1; border-radius: 16px;
   background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
+  background-size: 200% 100%; animation: shimmer 1.4s infinite;
 }
 .skeleton-btn {
   height: 44px; border-radius: 10px;
   background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
+  background-size: 200% 100%; animation: shimmer 1.4s infinite;
 }
 .skeleton-right { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
 .skeleton-line {
-  height: 14px; border-radius: 6px;
+  height: 14px; border-radius: 6px; width: 100%;
   background: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
-  width: 100%;
+  background-size: 200% 100%; animation: shimmer 1.4s infinite;
 }
 .skeleton-line--title { height: 28px; width: 60%; }
 .skeleton-line--short { width: 40%; }
@@ -274,12 +340,13 @@ onMounted(async () => {
   100% { background-position: -200% 0; }
 }
 
+/* ── Layout ───────────────────────────────────────────────── */
 .detail-content {
-  display: grid;
-  grid-template-columns: 420px 1fr;
-  gap: 48px;
-  align-items: start;
+  display: grid; grid-template-columns: 420px 1fr;
+  gap: 48px; align-items: start;
 }
+
+/* ── Image ────────────────────────────────────────────────── */
 .detail-image-wrap {
   position: relative; border-radius: 16px;
   overflow: hidden; aspect-ratio: 1; background: #f8f8f8;
@@ -289,14 +356,16 @@ onMounted(async () => {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
 }
+
+/* ── Badges ───────────────────────────────────────────────── */
 .status-badge {
   position: absolute; top: 12px; left: 12px;
-  font-size: 11px; font-weight: 600;
-  padding: 4px 10px; border-radius: 20px;
-  text-transform: uppercase;
+  font-size: 11px; font-weight: 600; padding: 4px 10px;
+  border-radius: 20px; text-transform: uppercase;
   background: #f0f0f0; color: #666;
 }
 .status-badge--minted { background: #E1F5EE; color: #085041; }
+.status-badge--listed  { background: #EEEDFE; color: #534AB7; }
 .status-badge--pending { background: #FFF8E1; color: #7a5c00; }
 .privacy-badge {
   position: absolute; top: 12px; right: 12px;
@@ -305,20 +374,89 @@ onMounted(async () => {
   padding: 4px 10px; border-radius: 20px;
   display: flex; align-items: center; gap: 4px;
 }
+
+/* ── Cardanoscan Button ───────────────────────────────────── */
 .cardanoscan-btn {
   display: block; margin-top: 16px; padding: 12px;
   text-align: center; background: #534AB7; color: #fff;
   border-radius: 10px; text-decoration: none;
-  font-size: 13px; font-weight: 500;
+  font-size: 13px; font-weight: 500; transition: background 0.2s;
 }
 .cardanoscan-btn:hover { background: #3d35a0; }
+
+/* ── Listing Section ──────────────────────────────────────── */
+.list-section { margin-top: 16px; }
+
+.list-btn {
+  width: 100%; padding: 12px;
+  background: #1a1a1a; color: #fff;
+  border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: background 0.2s;
+}
+.list-btn:hover { background: #333; }
+
+.list-form { display: flex; flex-direction: column; gap: 8px; }
+.price-label { font-size: 12px; color: #666; font-weight: 500; }
+.price-input {
+  padding: 10px 12px; border: 1.5px solid #e0e0e0;
+  border-radius: 8px; font-size: 14px; outline: none;
+}
+.price-input:focus { border-color: #534AB7; }
+.price-hint { font-size: 11px; color: #999; margin: 0; }
+
+.list-actions { display: flex; gap: 8px; }
+.btn-confirm {
+  flex: 1; padding: 10px; background: #534AB7; color: #fff;
+  border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; gap: 6px; transition: background 0.2s;
+}
+.btn-confirm:hover:not(:disabled) { background: #3d35a0; }
+.btn-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-cancel-list {
+  padding: 10px 16px; background: #f5f5f5;
+  border: none; border-radius: 8px; font-size: 14px; cursor: pointer;
+}
+.list-error { color: #d32f2f; font-size: 13px; margin: 0; }
+
+/* ── Listing Confirmed State ──────────────────────────────── */
+.listing-confirmed {
+  background: #E1F5EE; border: 1px solid #c3e6d8;
+  border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.confirmed-header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 600; color: #085041;
+}
+.confirmed-details { display: flex; flex-direction: column; gap: 6px; }
+.confirmed-row {
+  display: flex; justify-content: space-between;
+  font-size: 13px; color: #444;
+}
+.confirmed-row strong { color: #085041; }
+.confirmed-link { color: #534AB7; text-decoration: none; font-size: 13px; }
+.confirmed-link:hover { text-decoration: underline; }
+.confirmed-note { font-size: 12px; color: #666; margin: 0; }
+
+/* ── Already Listed ───────────────────────────────────────── */
+.already-listed {
+  margin-top: 16px; padding: 12px;
+  background: #EEEDFE; border-radius: 10px;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #534AB7;
+}
+
+/* ── Right Panel ──────────────────────────────────────────── */
 .detail-name { font-size: 28px; font-weight: 700; margin: 0 0 8px; }
 .detail-desc { font-size: 14px; color: #666; margin: 0 0 24px; line-height: 1.6; }
+
 .detail-section { margin-bottom: 24px; }
 .detail-section-title {
-  font-size: 12px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.5px;
-  color: #888; margin: 0 0 8px;
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #888; margin: 0 0 8px;
 }
 .detail-rows { display: flex; flex-direction: column; gap: 8px; }
 .detail-row {
@@ -328,7 +466,9 @@ onMounted(async () => {
 .detail-label { color: #666; }
 .detail-value { font-weight: 500; }
 .status--minted { color: #085041; }
+.status--listed  { color: #534AB7; }
 .status--pending { color: #7a5c00; }
+
 .copy-row {
   display: flex; align-items: center; gap: 8px;
   background: #f8f8f8; border-radius: 8px; padding: 10px 12px;
@@ -339,46 +479,20 @@ onMounted(async () => {
 }
 .copy-btn {
   background: none; border: none; cursor: pointer;
-  padding: 0; flex-shrink: 0;
-  display: flex; align-items: center;
+  padding: 0; flex-shrink: 0; display: flex; align-items: center;
 }
 .copy-btn:hover { opacity: 0.7; }
+
 .ipfs-link {
   font-size: 12px; color: #534AB7;
   text-decoration: none; word-break: break-all; font-family: monospace;
 }
 .ipfs-link:hover { text-decoration: underline; }
-.list-section { margin-top: 16px; }
-.list-btn {
-  width: 100%; padding: 12px;
-  background: #1a1a1a; color: #fff;
-  border: none; border-radius: 10px;
-  font-size: 14px; font-weight: 600; cursor: pointer;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-}
-.list-btn:hover { background: #333; }
-.list-form { display: flex; flex-direction: column; gap: 10px; }
-.price-input {
-  padding: 10px 12px; border: 1.5px solid #e0e0e0;
-  border-radius: 8px; font-size: 14px; outline: none;
-}
-.price-input:focus { border-color: #534AB7; }
-.list-actions { display: flex; gap: 8px; }
-.btn-confirm {
-  flex: 1; padding: 10px; background: #534AB7; color: #fff;
-  border: none; border-radius: 8px; font-size: 14px; font-weight: 600;
-  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
-}
-.btn-confirm:disabled { opacity: 0.6; cursor: not-allowed; }
-.btn-cancel-list {
-  padding: 10px 16px; background: #f5f5f5;
-  border: none; border-radius: 8px; font-size: 14px; cursor: pointer;
-}
-.list-error { color: #d32f2f; font-size: 13px; margin: 0; }
-.list-success { color: #085041; font-size: 13px; margin: 0; }
+
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Mobile ───────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .nft-detail { padding: 16px; }
   .detail-content { grid-template-columns: 1fr; gap: 24px; }

@@ -192,6 +192,8 @@ router.post("/buy", async (req: Request, res: Response) => {
       return;
     }
 
+    // Seller receives full price minus royalty
+    // Platform fee will be enforced on-chain in the Aiken validator (Day 8)
     const sellerAmount = price_lovelace - royalty_amount;
     const marketplaceScript = applyCborEncoding(marketplaceValidator.compiledCode);
 
