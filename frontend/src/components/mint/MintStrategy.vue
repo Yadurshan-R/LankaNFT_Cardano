@@ -8,7 +8,9 @@
         :class="['option', { active: modelValue === 'standard' }]"
         @click="$emit('update:modelValue', 'standard')"
       >
-        <div class="option-icon">🚀</div>
+        <div class="option-icon">
+          <Rocket :size="24" :color="modelValue === 'standard' ? '#534AB7' : '#888'" />
+        </div>
         <div>
           <div class="option-title">Standard Mint</div>
           <div class="option-desc">Creator pays gas and mints the NFT on-chain.</div>
@@ -20,7 +22,9 @@
         :class="['option', { active: modelValue === 'lazy' }]"
         @click="$emit('update:modelValue', 'lazy')"
       >
-        <div class="option-icon">✍️</div>
+        <div class="option-icon">
+          <PenLine :size="24" :color="modelValue === 'lazy' ? '#534AB7' : '#888'" />
+        </div>
         <div>
           <div class="option-title">Lazy Minting</div>
           <div class="option-desc">Sign metadata only. NFT is minted when the first buyer purchases it.</div>
@@ -32,6 +36,8 @@
 </template>
 
 <script setup lang="ts">
+import { PenLine, Rocket } from 'lucide-vue-next'
+
 defineProps<{ modelValue: 'standard' | 'lazy' }>()
 defineEmits(['update:modelValue'])
 </script>
@@ -55,7 +61,7 @@ defineEmits(['update:modelValue'])
   display: flex; align-items: center; gap: 12px; transition: all 0.2s;
 }
 .option.active { border-color: #534AB7; background: #EEEDFE; }
-.option-icon { font-size: 24px; }
+.option-icon { display: flex; align-items: center; flex-shrink: 0; }
 .option-title { font-size: 14px; font-weight: 500; }
 .option-desc { font-size: 12px; color: #666; margin-top: 2px; }
 .radio {

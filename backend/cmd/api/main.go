@@ -2,11 +2,15 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"golang.org/x/time/rate"
 
 	"NFT_Minting_Platform/internal/auth"
 	"NFT_Minting_Platform/internal/batch"
@@ -16,31 +20,72 @@ import (
 	"NFT_Minting_Platform/internal/nft"
 )
 
+// ─── Per-user rate limiter ─────────────────────────────────────────────────────
+// Each user gets a token bucket: 5 mint requests per minute
+// Prevents custodial wallet draining and spam minting
+
+type userLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+var (
+	limiters   = make(map[string]*userLimiter)
+	limitersMu sync.Mutex
+)
+
+func getLimiter(userID string) *rate.Limiter {
+	limitersMu.Lock()
+	defer limitersMu.Unlock()
+
+	ul, exists := limiters[userID]
+	if !exists {
+		// 5 requests per minute, burst of 3
+		ul = &userLimiter{
+			limiter:  rate.NewLimiter(rate.Every(time.Minute/5), 3),
+			lastSeen: time.Now(),
+		}
+		limiters[userID] = ul
+	}
+	ul.lastSeen = time.Now()
+	return ul.limiter
+}
+
+// cleanupLimiters removes limiters for users not seen in the last 10 minutes
+func cleanupLimiters() {
+	for {
+		time.Sleep(10 * time.Minute)
+		limitersMu.Lock()
+		for id, ul := range limiters {
+			if time.Since(ul.lastSeen) > 10*time.Minute {
+				delete(limiters, id)
+			}
+		}
+		limitersMu.Unlock()
+	}
+}
+
 func main() {
-	// Load .env file — must be first thing that runs
 	if err := godotenv.Load(".env"); err != nil {
 		log.Fatal("Error loading .env file")
 	}
 
-	// Connect to PostgreSQL
 	db.Connect()
 	defer db.Close()
 
-	// Set Gin to debug mode for development
-	gin.SetMode(gin.DebugMode)
+	// Start limiter cleanup goroutine
+	go cleanupLimiters()
 
-	// Create router with logger + panic recovery
+	gin.SetMode(gin.DebugMode)
 	router := gin.Default()
 
-	// CORS — allow Vue frontend to call Go backend
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
-		AllowCredentials: true, // required for cookies
+		AllowCredentials: true,
 	}))
 
-	// Health check — no auth needed
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status":  "ok",
@@ -48,16 +93,34 @@ func main() {
 		})
 	})
 
-	// Auth routes — no JWT needed (these are how you get the JWT)
 	authService := auth.NewService(db.DB)
 	authHandler := auth.NewHandler(authService)
 	authHandler.RegisterRoutes(router)
 
-	// Protected routes — JWT required for all routes below
 	protected := router.Group("/api")
 	protected.Use(middleware.AuthRequired())
+
+	// Apply rate limiting as a separate middleware on the protected router
+	// This wraps specific paths without re-registering them, ensuring user_id is loaded
+	protected.Use(func(c *gin.Context) {
+		path := c.FullPath()
+		if path == "/api/nft/mint" || path == "/api/batch/mint" {
+			userID := c.GetString("user_id")
+			if userID != "" {
+				limiter := getLimiter(userID)
+				if !limiter.Allow() {
+					c.JSON(http.StatusTooManyRequests, gin.H{
+						"error": "Too many mint requests. Please wait a moment.",
+					})
+					c.Abort()
+					return
+				}
+			}
+		}
+		c.Next()
+	})
+
 	{
-		// Confirm authenticated user
 		protected.GET("/me", func(c *gin.Context) {
 			userID := c.GetString("user_id")
 			c.JSON(200, gin.H{
@@ -66,15 +129,12 @@ func main() {
 			})
 		})
 
-		// Single NFT minting routes
 		nftHandler := nft.NewHandler(db.DB)
 		nftHandler.RegisterRoutes(protected)
 
-		// Batch NFT minting routes
 		batchHandler := batch.NewHandler(db.DB)
 		batchHandler.RegisterRoutes(protected)
 
-		// Marketplace listing routes
 		listingHandler := listing.NewHandler(db.DB)
 		listingHandler.RegisterRoutes(protected)
 	}

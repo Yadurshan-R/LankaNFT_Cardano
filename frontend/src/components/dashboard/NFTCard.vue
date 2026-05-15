@@ -1,6 +1,5 @@
 <template>
   <div class="nft-card" @click="goToDetail" style="cursor: pointer;">
-    <!-- Image -->
     <div class="nft-image-wrap">
       <img
         v-if="imageUrl"
@@ -9,18 +8,19 @@
         class="nft-image"
         @error="imageError = true"
       />
-      <div v-else class="nft-image-placeholder">🖼</div>
+      <div v-else class="nft-image-placeholder">
+        <ImageIcon :size="40" color="#ccc" />
+      </div>
 
-      <!-- Status badge -->
       <div :class="['status-badge', `status-badge--${nft.status}`]">
         {{ nft.status }}
       </div>
 
-      <!-- Privacy badge -->
-      <div v-if="nft.privacy === 'private'" class="privacy-badge">🔒</div>
+      <div v-if="nft.privacy === 'private'" class="privacy-badge">
+        <Lock :size="12" color="#fff" />
+      </div>
     </div>
 
-    <!-- Info -->
     <div class="nft-info">
       <h3 class="nft-name">{{ nft.name }}</h3>
       <p v-if="nft.description" class="nft-desc">{{ nft.description }}</p>
@@ -32,11 +32,11 @@
         </span>
       </div>
 
-      <!-- Cardanoscan link — stop propagation so card click doesn't interfere -->
       <a
         v-if="nft.tx_hash"
         :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
         target="_blank"
+        rel="noopener noreferrer"
         class="tx-link"
         @click.stop
       >
@@ -49,6 +49,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Image as ImageIcon, Lock } from 'lucide-vue-next'
 
 const props = defineProps<{
   nft: {
@@ -77,8 +78,7 @@ const imageUrl = computed(() => {
   if (imageError.value) return null
   if (!props.nft.image) return null
   if (props.nft.image.startsWith('ipfs://')) {
-    const hash = props.nft.image.replace('ipfs://', '')
-    return `https://gateway.pinata.cloud/ipfs/${hash}`
+    return `https://gateway.pinata.cloud/ipfs/${props.nft.image.replace('ipfs://', '')}`
   }
   return props.nft.image
 })
@@ -106,7 +106,6 @@ const imageUrl = computed(() => {
 .nft-image-placeholder {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 48px; color: #ccc;
 }
 .status-badge {
   position: absolute; top: 8px; left: 8px;
@@ -118,7 +117,13 @@ const imageUrl = computed(() => {
 .status-badge--minted { background: #E1F5EE; color: #085041; }
 .status-badge--pending { background: #FFF8E1; color: #7a5c00; }
 .status-badge--failed { background: #FCEBEB; color: #791F1F; }
-.privacy-badge { position: absolute; top: 8px; right: 8px; font-size: 14px; }
+.privacy-badge {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0,0,0,0.5);
+  border-radius: 50%;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+}
 .nft-info { padding: 12px; }
 .nft-name {
   font-size: 14px; font-weight: 600; margin: 0 0 4px;
@@ -133,9 +138,7 @@ const imageUrl = computed(() => {
   font-size: 11px; background: #f5f5f5; color: #666;
   padding: 2px 6px; border-radius: 4px;
 }
-.meta-tag--policy {
-  font-family: monospace; background: #EEEDFE; color: #534AB7;
-}
+.meta-tag--policy { font-family: monospace; background: #EEEDFE; color: #534AB7; }
 .tx-link { font-size: 11px; color: #534AB7; text-decoration: none; }
 .tx-link:hover { text-decoration: underline; }
 </style>

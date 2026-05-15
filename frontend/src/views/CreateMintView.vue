@@ -1,6 +1,5 @@
 <template>
   <div class="create-mint">
-    <!-- Header -->
     <div class="page-header">
       <router-link to="/" class="back-link">← Back to Dashboard</router-link>
       <div class="header-row">
@@ -23,10 +22,18 @@
 
     <!-- Success state -->
     <div v-if="mintSuccess" class="success-card">
-      <div class="success-icon">✅</div>
+      <div class="success-icon">
+        <CheckCircle :size="48" color="#1D9E75" />
+      </div>
       <h2>NFT Minted Successfully!</h2>
       <p>Your NFT has been minted on Cardano Preprod.</p>
-      <a :href="`https://preprod.cardanoscan.io/transaction/${lastTxHash}`" target="_blank" class="tx-link">
+      
+      <a
+        :href="`https://preprod.cardanoscan.io/transaction/${lastTxHash}`"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="tx-link"
+      >
         View on Cardanoscan →
       </a>
       <BaseButton variant="outline" @click="resetForm">Mint Another</BaseButton>
@@ -39,24 +46,23 @@
       <PrivacySelector v-model="privacy" />
       <MintStrategy v-model="mintStrategy" />
 
-      <!-- Error -->
       <p v-if="nftStore.error" class="error-msg">{{ nftStore.error }}</p>
 
-      <!-- Submit -->
       <BaseButton
         variant="primary"
         :loading="nftStore.isLoading"
         :disabled="!selectedFile || !metadata.name"
         @click="handleMint"
       >
-        🏷 List for Sale
+        <Tag :size="14" /> Mint NFT
       </BaseButton>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { reactive, ref } from 'vue'
+import { CheckCircle, Tag } from 'lucide-vue-next'
 import { useNFTStore } from '@/stores/nft'
 import UploadAsset from '@/components/mint/UploadAsset.vue'
 import MetadataForm from '@/components/mint/MetadataForm.vue'
@@ -65,7 +71,6 @@ import MintStrategy from '@/components/mint/MintStrategy.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 
 const nftStore = useNFTStore()
-
 const selectedFile = ref<File | null>(null)
 const uploadMode = ref<'single' | 'batch'>('single')
 const privacy = ref<'public' | 'private'>('public')
@@ -80,18 +85,11 @@ const metadata = reactive({
   totalSupply: '1',
 })
 
-function onFileSelected(file: File) {
-  selectedFile.value = file
-}
-
-function onMetadataUpdate(data: typeof metadata) {
-  Object.assign(metadata, data)
-}
+function onFileSelected(file: File) { selectedFile.value = file }
+function onMetadataUpdate(data: typeof metadata) { Object.assign(metadata, data) }
 
 async function handleMint() {
   if (!selectedFile.value || !metadata.name) return
-
-  // Build multipart form
   const formData = new FormData()
   formData.append('file', selectedFile.value)
   formData.append('name', metadata.name)
@@ -99,15 +97,10 @@ async function handleMint() {
   formData.append('royalties', metadata.royalties)
   formData.append('total_supply', metadata.totalSupply)
   formData.append('privacy', privacy.value)
-
-  // Step 1 — upload to IPFS + store in DB
   const prepared = await nftStore.prepare(formData)
   if (!prepared) return
-
-  // Step 2 — mint on blockchain
   const minted = await nftStore.mint(prepared.nft_id)
   if (!minted) return
-
   lastTxHash.value = minted.tx_hash
   mintSuccess.value = true
 }
@@ -140,6 +133,6 @@ function resetForm() {
   border-radius: 16px; display: flex; flex-direction: column;
   align-items: center; gap: 16px;
 }
-.success-icon { font-size: 48px; }
+.success-icon { display: flex; justify-content: center; }
 .tx-link { color: #534AB7; font-size: 13px; text-decoration: underline; }
 </style>
