@@ -19,3 +19,12 @@ export async function getMyNFTs() {
   const res = await api.get('/api/nft/my-nfts')
   return res.data
 }
+
+// Transfer an NFT to another wallet address
+export async function transferNFT(nftId: string, recipientAddress: string) {
+  const res = await api.post('/api/nft/transfer', {
+    nft_id: nftId,
+    recipient_address: recipientAddress,
+  })
+  return res.data
+}

@@ -114,6 +114,82 @@
           </div>
         </div>
 
+        <!-- ── Transfer Section ────────────────────────────────────────── -->
+        <div v-if="nft.status === 'minted'" class="transfer-section">
+
+          <!-- Transfer confirmed state -->
+          <div v-if="transferConfirmed" class="transfer-confirmed">
+            <div class="confirmed-header">
+              <Send :size="16" color="#534AB7" />
+              <span>NFT Sent Successfully!</span>
+            </div>
+            <div class="confirmed-details">
+              <div class="confirmed-row">
+                <span>Sent to</span>
+                <code class="confirmed-addr">{{ transferAddress.slice(0, 20) }}...{{ transferAddress.slice(-6) }}</code>
+              </div>
+              <div class="confirmed-row">
+                <span>Transaction</span>
+                <a
+                  :href="`https://preprod.cardanoscan.io/transaction/${transferTxHash}`"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="confirmed-link"
+                >
+                  View on Cardanoscan →
+                </a>
+              </div>
+            </div>
+            <p class="confirmed-note">This NFT has been removed from your dashboard.</p>
+          </div>
+
+          <!-- Transfer form -->
+          <div v-else>
+            <div v-if="!showTransferForm">
+              <button class="transfer-btn" @click="showTransferForm = true">
+                <Send :size="14" /> Transfer NFT
+              </button>
+            </div>
+            <div v-else class="transfer-form">
+              <label class="price-label">Recipient Address</label>
+              <input
+                v-model="transferAddress"
+                class="price-input"
+                placeholder="addr_test1..."
+              />
+              <p class="price-hint">Enter any valid Cardano preprod address</p>
+
+              <!-- Fee estimate — always shown when form is open -->
+              <!-- Transfer costs ~0.2 ADA network fee + 2 ADA min-UTxO sent with NFT -->
+              <!-- The 2 ADA is sent TO the recipient, not lost — it is part of the transfer -->
+              <div class="transfer-fee-info">
+                <div class="fee-row">
+                  <span>Min-ADA sent with NFT</span>
+                  <span>2 ADA <span class="fee-note">(goes to recipient)</span></span>
+                </div>
+                <div class="fee-row">
+                  <span>Network fee</span>
+                  <span>~0.2 ADA</span>
+                </div>
+                <div class="fee-divider" />
+                <div class="fee-row fee-row--total">
+                  <span>You will spend</span>
+                  <strong>~2.2 ADA</strong>
+                </div>
+              </div>
+
+              <div class="list-actions">
+                <button class="btn-confirm" :disabled="transferring || !transferAddress" @click="handleTransfer">
+                  <Loader2 v-if="transferring" :size="14" class="spin" />
+                  {{ transferring ? 'Sending NFT...' : 'Send NFT' }}
+                </button>
+                <button class="btn-cancel-list" @click="showTransferForm = false; transferError = ''">Cancel</button>
+              </div>
+              <p v-if="transferError" class="list-error">{{ transferError }}</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Already listed state -->
         <div v-if="nft.status === 'listed'" class="already-listed">
           <Store :size="16" color="#534AB7" />
@@ -213,11 +289,13 @@ import {
   Image as ImageIcon,
   Loader2,
   Lock,
+  Send,
   Store,
   Tag,
 } from 'lucide-vue-next'
 import { useDashboardStore } from '@/stores/dashboard'
 import { createListing } from '@/services/listing'
+import { transferNFT } from '@/services/nft'
 
 const route = useRoute()
 const dashboard = useDashboardStore()
@@ -235,6 +313,14 @@ const listError = ref('')
 // Post-listing confirmation state
 const listingConfirmed = ref(false)
 const listingTxHash = ref('')
+
+// Transfer state
+const showTransferForm = ref(false)
+const transferAddress = ref('')
+const transferring = ref(false)
+const transferError = ref('')
+const transferConfirmed = ref(false)
+const transferTxHash = ref('')
 
 // Find the NFT from the store by URL param
 const nft = computed(() =>
@@ -294,6 +380,30 @@ async function handleList() {
     listError.value = err.response?.data?.error || 'Failed to list NFT'
   } finally {
     listing.value = false
+  }
+}
+
+async function handleTransfer() {
+  if (!nft.value) return
+  if (!transferAddress.value.startsWith('addr')) {
+    transferError.value = 'Enter a valid Cardano address starting with addr'
+    return
+  }
+
+  transferring.value = true
+  transferError.value = ''
+
+  try {
+    const result = await transferNFT(nft.value.id, transferAddress.value)
+    transferTxHash.value = result.tx_hash
+    transferConfirmed.value = true
+    showTransferForm.value = false
+    // Reload dashboard to remove NFT from view
+    await dashboard.loadDashboard()
+  } catch (err: any) {
+    transferError.value = err.response?.data?.error || 'Failed to transfer NFT'
+  } finally {
+    transferring.value = false
   }
 }
 
@@ -440,6 +550,50 @@ onMounted(async () => {
 .confirmed-link { color: #534AB7; text-decoration: none; font-size: 13px; }
 .confirmed-link:hover { text-decoration: underline; }
 .confirmed-note { font-size: 12px; color: #666; margin: 0; }
+
+/* ── Transfer Section ─────────────────────────────────────── */
+.transfer-section { margin-top: 12px; }
+
+.transfer-btn {
+  width: 100%; padding: 12px;
+  background: #f5f5f5; color: #333;
+  border: 1.5px solid #e0e0e0; border-radius: 10px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: all 0.2s;
+}
+.transfer-btn:hover { border-color: #534AB7; color: #534AB7; background: #EEEDFE; }
+
+.transfer-form { display: flex; flex-direction: column; gap: 8px; }
+
+/* Fee estimate box shown before confirming transfer */
+.transfer-fee-info {
+  background: #fafafa; border: 1px solid #e8e8e8;
+  border-radius: 8px; padding: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.fee-row {
+  display: flex; justify-content: space-between;
+  font-size: 12px; color: #555;
+}
+.fee-row--total { margin-top: 2px; font-size: 13px; }
+.fee-row--total strong { color: #534AB7; }
+.fee-note { color: #888; font-size: 11px; }
+.fee-divider { height: 1px; background: #e8e8e8; margin: 2px 0; }
+
+/* Transfer confirmed card */
+.transfer-confirmed {
+  background: #EEEDFE; border: 1px solid #c5c1f0;
+  border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.transfer-confirmed .confirmed-header {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600; color: #534AB7;
+}
+.confirmed-addr {
+  font-family: monospace; font-size: 11px; color: #534AB7;
+}
 
 /* ── Already Listed ───────────────────────────────────────── */
 .already-listed {

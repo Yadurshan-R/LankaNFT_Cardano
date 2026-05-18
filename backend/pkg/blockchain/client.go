@@ -194,6 +194,36 @@ func (c *Client) CancelListing(req CancelListingRequest) (*CancelListingResponse
 	return &result, nil
 }
 
+// ─── Transfer ─────────────────────────────────────────────────────────────────
+
+// TransferNFTRequest is sent to the sidecar to transfer an NFT to another address
+type TransferNFTRequest struct {
+	Mnemonic         []string `json:"mnemonic"`
+	NFTUnit          string   `json:"nft_unit"`
+	RecipientAddress string   `json:"recipient_address"`
+}
+
+// TransferNFTResponse is returned after successful transfer
+type TransferNFTResponse struct {
+	TxHash           string `json:"tx_hash"`
+	NFTUnit          string `json:"nft_unit"`
+	RecipientAddress string `json:"recipient_address"`
+}
+
+// TransferNFT calls the sidecar to send an NFT to another address
+func (c *Client) TransferNFT(req TransferNFTRequest) (*TransferNFTResponse, error) {
+	resp, err := c.post("/api/transfer", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result TransferNFTResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode transfer response: %w", err)
+	}
+	return &result, nil
+}
+
 // ─── Wallet ───────────────────────────────────────────────────────────────────
 
 type GenerateWalletResponse struct {

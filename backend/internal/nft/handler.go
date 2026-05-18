@@ -1,6 +1,7 @@
 package nft
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,11 +35,144 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 		nft.POST("/prepare-mint", h.PrepareMint)
 		nft.POST("/confirm-mint", h.ConfirmMint)
 		nft.POST("/mint", h.MintNFT)
+		nft.POST("/transfer", h.TransferNFT) // Day 8: NFT transfer
 		nft.GET("/my-nfts", h.GetMyNFTs)
 		nft.GET("/wallet", h.GetWallet)
 		nft.GET("/stats", h.GetStats)
 		nft.GET("/balance", h.GetWalletBalance)
 	}
+}
+
+// TransferNFT godoc
+// POST /api/nft/transfer
+//
+// Transfers an NFT from the authenticated user's custodial wallet
+// to any recipient address (custodial or external Cardano address).
+//
+// Body: { nft_id, recipient_address }
+func (h *Handler) TransferNFT(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		NFTID            string `json:"nft_id" binding:"required"`
+		RecipientAddress string `json:"recipient_address" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate recipient address — must start with addr_test1 (preprod)
+	// Prevents accidental transfers to invalid or mainnet addresses
+	if len(body.RecipientAddress) < 10 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid recipient address"})
+		return
+	}
+
+	// Verify NFT belongs to this user and is in a transferable state
+	// Cannot transfer listed NFTs — must cancel listing first
+	var policyID, userTokenName, nftStatus string
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT policy_id, user_token_name, status
+		FROM nfts
+		WHERE id = $1 AND owner_id = $2
+	`, body.NFTID, userID).Scan(&policyID, &userTokenName, &nftStatus)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not yours"})
+		return
+	}
+
+	// Block transfer of listed NFTs — NFT is locked at marketplace script
+	if nftStatus == "listed" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "cannot transfer a listed NFT — cancel the listing first",
+		})
+		return
+	}
+
+	// Block transfer of pending NFTs — tx not yet confirmed on-chain
+	if nftStatus == "pending" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "NFT is still pending — wait for minting to confirm",
+		})
+		return
+	}
+
+	// Load sender's custodial wallet mnemonic
+	mnemonic, senderAddress, err := h.service.GetWalletForUser(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
+		return
+	}
+
+	// Prevent self-transfer
+	if senderAddress == body.RecipientAddress {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot transfer to your own address"})
+		return
+	}
+
+	// Build the on-chain NFT unit from policy ID and token name
+	// DB stores raw token name; on-chain needs hex encoded
+	nftUnit := buildNFTUnit(policyID, userTokenName)
+
+	// Call the blockchain sidecar to build and submit the transfer tx
+	result, err := h.service.blockchainClient.TransferNFT(blockchain.TransferNFTRequest{
+		Mnemonic:         mnemonic,
+		NFTUnit:          nftUnit,
+		RecipientAddress: body.RecipientAddress,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to transfer NFT: " + err.Error(),
+		})
+		return
+	}
+
+	// Check if recipient is another custodial user on this platform
+	// If so, transfer ownership in DB so it appears in their dashboard
+	var recipientUserID string
+	dbErr := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT user_id FROM custodial_wallets WHERE wallet_address = $1
+	`, body.RecipientAddress).Scan(&recipientUserID)
+
+	if dbErr == nil && recipientUserID != "" {
+		// Recipient is a platform user — update NFT ownership in DB
+		h.service.db.Exec(c.Request.Context(), `
+			UPDATE nfts
+			SET owner_id = $1, updated_at = NOW()
+			WHERE id = $2
+		`, recipientUserID, body.NFTID)
+	} else {
+		// Recipient is an external wallet — mark NFT as transferred
+		// Remove from sender's dashboard since it left the platform
+		h.service.db.Exec(c.Request.Context(), `
+			UPDATE nfts
+			SET status = 'transferred', updated_at = NOW()
+			WHERE id = $1
+		`, body.NFTID)
+	}
+
+	log.Printf("NFT transferred — nft: %s, from: %s, to: %s, tx: %s",
+		body.NFTID, senderAddress, body.RecipientAddress, result.TxHash)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":           "NFT transferred successfully",
+		"tx_hash":           result.TxHash,
+		"recipient_address": body.RecipientAddress,
+		"cardanoscan":       fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", result.TxHash),
+	})
+}
+
+// buildNFTUnit converts DB token name to on-chain hex unit
+// DB stores: "001bc280" + rawName — On-chain: "001bc280" + hex(rawName)
+func buildNFTUnit(policyID, tokenName string) string {
+	if len(tokenName) < 8 {
+		return policyID + tokenName
+	}
+	prefix := tokenName[:8]
+	raw := tokenName[8:]
+	encoded := hex.EncodeToString([]byte(raw))
+	return policyID + prefix + encoded
 }
 
 // PrepareMint godoc
@@ -126,9 +260,9 @@ func (h *Handler) MintNFT(c *gin.Context) {
 	var assetName, metadataIPFS, imageIPFS string
 	var royalties float64
 	err := h.service.db.QueryRow(c.Request.Context(), `
-		SELECT asset_name, metadata_ipfs, image_ipfs, royalties
-		FROM nfts WHERE id = $1 AND owner_id = $2
-	`, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties)
+        SELECT asset_name, metadata_ipfs, image_ipfs, royalties
+        FROM nfts WHERE id = $1 AND owner_id = $2
+    `, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found"})
 		return
@@ -182,7 +316,7 @@ func (h *Handler) ConfirmMint(c *gin.Context) {
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.Status(http.StatusBadRequest)
 		return
 	}
 

@@ -17,6 +17,7 @@ import { generateWallet, signTransaction, getWalletAddress } from "./wallet";
 import mintRouter from "./routes/mint";
 import batchRouter from "./routes/batch";
 import marketplaceRouter from "./routes/marketplace";
+import transferRouter from "./routes/transfer";
 
 dotenv.config();
 
@@ -80,6 +81,9 @@ app.use("/api/mint", batchRouter);
 
 // Marketplace routes
 app.use("/api/marketplace", marketplaceRouter);
+
+// NFT transfer — send any NFT to another address
+app.use("/api/transfer", transferRouter);
 
 app.listen(config.port, () => {
   console.log(`Blockchain service running on port ${config.port}`);
