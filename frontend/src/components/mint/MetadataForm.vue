@@ -22,11 +22,18 @@
         placeholder="5"
       />
       <div class="full-width">
-        <BaseInput
-          v-model="form.description"
-          label="Description"
-          placeholder="Enter description"
-        />
+        <div class="field-wrap">
+          <label class="field-label">Description *</label>
+          <input
+            v-model="form.description"
+            class="field-input"
+            placeholder="Enter description"
+            maxlength="200"
+          />
+          <p class="char-count" :class="{ 'char-count--warn': form.description.length > 180 }">
+            {{ form.description.length }}/200 characters
+          </p>
+        </div>
       </div>
       <BaseInput
         v-model="form.totalSupply"

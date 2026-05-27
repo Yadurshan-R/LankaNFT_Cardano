@@ -61,7 +61,12 @@
                 {{ row.name.length }}/28
               </span>
             </td>
-            <td><input v-model="row.description" class="cell-input" placeholder="Enter description" /></td>
+            <td>
+              <input v-model="row.description" class="cell-input" placeholder="Enter description" maxlength="200" />
+              <span class="name-count" :class="{ 'name-count--warn': row.description.length > 180 }">
+                {{ row.description.length }}/200
+              </span>
+            </td>
             <td>
               <input v-model.number="row.royalties" class="cell-input cell-input--narrow" type="number" min="0" max="100" />
             </td>
