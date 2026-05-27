@@ -213,9 +213,23 @@ func (h *Handler) PrepareMint(c *gin.Context) {
 		privacy = "public"
 	}
 
+	// Validate asset name — Cardano enforces 32 byte max on token names
+	// CIP-68 prefix takes 4 bytes, leaving 28 bytes for the actual asset name
+	nftName := c.PostForm("name")
+	if len(nftName) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "NFT name is required"})
+		return
+	}
+	if len(nftName) > 28 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("NFT name is too long (%d chars). Maximum is 28 characters.", len(nftName)),
+		})
+		return
+	}
+
 	req := MintRequest{
 		OwnerID:     userID,
-		Name:        c.PostForm("name"),
+		Name:        nftName,
 		Description: c.PostForm("description"),
 		Royalties:   royalties,
 		TotalSupply: totalSupply,
@@ -223,11 +237,6 @@ func (h *Handler) PrepareMint(c *gin.Context) {
 		ImageData:   fileData,
 		ImageName:   header.Filename,
 		Attributes:  map[string]string{},
-	}
-
-	if req.Name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "NFT name is required"})
-		return
 	}
 
 	result, err := h.service.PrepareMint(c.Request.Context(), req)

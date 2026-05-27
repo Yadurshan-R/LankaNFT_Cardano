@@ -275,6 +275,24 @@ func (h *Handler) MintBatch(c *gin.Context) {
 		return
 	}
 
+	// Validate asset name lengths — Cardano enforces 32 byte max on token names
+	// CIP-68 prefix takes 4 bytes, leaving 28 bytes for the asset name
+	for _, item := range mintItems {
+		if len(item.AssetName) > 28 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf(
+					"NFT name '%s' is too long (%d chars). Maximum is 28 characters.",
+					item.AssetName, len(item.AssetName),
+				),
+			})
+			return
+		}
+		if len(item.AssetName) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "NFT name cannot be empty"})
+			return
+		}
+	}
+
 	// Update batch status to minting
 	h.service.UpdateBatchStatus(c.Request.Context(), body.BatchID, "minting")
 

@@ -55,7 +55,12 @@
                 <input type="file" accept="image/*" style="display:none" @change="(e: Event) => onSingleFileChange(e, i)" />
               </label>
             </td>
-            <td><input v-model="row.name" class="cell-input" placeholder="Enter name" /></td>
+            <td>
+              <input v-model="row.name" class="cell-input" placeholder="Enter name" maxlength="28" />
+              <span class="name-count" :class="{ 'name-count--warn': row.name.length > 24 }">
+                {{ row.name.length }}/28
+              </span>
+            </td>
             <td><input v-model="row.description" class="cell-input" placeholder="Enter description" /></td>
             <td>
               <input v-model.number="row.royalties" class="cell-input cell-input--narrow" type="number" min="0" max="100" />
@@ -124,7 +129,7 @@ function createRow(file?: File): BatchRow {
 }
 
 function fileNameWithoutExtension(filename: string): string {
-  return filename.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ')
+  return filename.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ').slice(0, 28)
 }
 
 function notifyChange() {
@@ -304,4 +309,6 @@ defineExpose({ rows })
   font-size: 14px; border: 1.5px dashed #e0e0e0;
   border-radius: 10px; margin-top: 12px;
 }
+.name-count { font-size: 10px; color: #bbb; display: block; margin-top: 2px; }
+.name-count--warn { color: #d32f2f; }
 </style>

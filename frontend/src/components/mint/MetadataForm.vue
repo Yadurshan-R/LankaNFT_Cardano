@@ -3,11 +3,18 @@
     <h3 class="section-num"><span>2</span> Metadata</h3>
 
     <div class="form-grid">
-      <BaseInput
-        v-model="form.name"
-        label="NFT Name *"
-        placeholder="Enter name"
-      />
+      <div class="field-wrap">
+        <label class="field-label">NFT Name *</label>
+        <input
+          v-model="form.name"
+          class="field-input"
+          placeholder="Enter name"
+          maxlength="28"
+        />
+        <p class="char-count" :class="{ 'char-count--warn': form.name.length > 24 }">
+          {{ form.name.length }}/28 characters
+        </p>
+      </div>
       <BaseInput
         v-model="form.royalties"
         label="Royalties (%)"
@@ -77,4 +84,14 @@ watch(form, () => emit('update', form), { deep: true })
   gap: 16px;
 }
 .full-width { grid-column: 1 / -1; }
+
+.field-wrap { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font-size: 12px; font-weight: 500; color: #444; }
+.field-input {
+  padding: 10px 12px; border: 1.5px solid #e0e0e0;
+  border-radius: 8px; font-size: 14px; outline: none;
+}
+.field-input:focus { border-color: #534AB7; }
+.char-count { font-size: 11px; color: #999; margin: 0; }
+.char-count--warn { color: #d32f2f; }
 </style>

@@ -1,50 +1,46 @@
+<!-- ─────────────────────────────────────────────────────────────────────────
+  App.vue — LankaNFT root layout
+  
+  Auth page:  full screen, no sidebar
+  All others: collapsible sidebar (AppSidebar) + main content area
+──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <div id="app">
-    <!-- Navbar shown on all pages except auth -->
-    <AppNavbar v-if="!isAuthPage" />
-
-    <!-- Page content -->
-    <main :class="{ 'with-navbar': !isAuthPage }">
+    <template v-if="isAuthPage">
       <router-view />
-    </main>
+    </template>
+    <template v-else>
+      <div class="app-layout">
+        <AppSidebar />
+        <main class="main-content">
+          <router-view />
+        </main>
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import AppNavbar from '@/components/ui/AppNavbar.vue'
+import AppSidebar from '@/components/layout/AppSidebar.vue'
 
-const route = useRoute()
-
-// Hide navbar on the auth page
+const route      = useRoute()
 const isAuthPage = computed(() => route.name === 'auth')
 </script>
 
 <style>
-/* Global styles */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #ffffff;
-  color: #111111;
+  background: #f8f8f8;
+  color: #111;
+  -webkit-font-smoothing: antialiased;
 }
 
-#app {
-  min-height: 100vh;
-}
+a { text-decoration: none; color: inherit; }
 
-.with-navbar {
-  padding-top: 0;
-}
-
-a {
-  text-decoration: none;
-  color: inherit;
-}
+.app-layout   { display: flex; min-height: 100vh; }
+.main-content { flex: 1; margin-left: 60px; min-height: 100vh; background: #f8f8f8; }
 </style>
