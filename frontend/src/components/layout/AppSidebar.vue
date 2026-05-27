@@ -1,10 +1,3 @@
-<!-- ─────────────────────────────────────────────────────────────────────────
-  AppSidebar.vue — LankaNFT collapsible sidebar
-  
-  Collapsed (default): 60px wide, icons only
-  Expanded (on hover):  200px wide, icons + labels slide in
-  Wallet popup:         shown only when user clicks the wallet icon
-──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <aside
     class="sidebar"
@@ -12,7 +5,6 @@
     @mouseenter="isExpanded = true"
     @mouseleave="isExpanded = false; isWalletOpen = false"
   >
-    <!-- Logo -->
     <router-link to="/" class="sidebar-logo">
       <img src="@/assets/lanka-nft-logo.png" alt="LankaNFT" class="logo-img" />
       <span class="logo-text">LankaNFT</span>
@@ -20,7 +12,6 @@
 
     <div class="sidebar-divider" />
 
-    <!-- Main navigation -->
     <nav class="sidebar-nav">
       <router-link to="/"        exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="20" /><span class="sidebar-label">Dashboard</span></router-link>
       <router-link to="/mint"    active-class="sidebar-item--active"       class="sidebar-item"><Sparkles        :size="20" /><span class="sidebar-label">Create Mint</span></router-link>
@@ -33,11 +24,9 @@
       <router-link to="/activity" active-class="sidebar-item--active" class="sidebar-item"><Activity :size="20" /><span class="sidebar-label">Activity</span></router-link>
     </nav>
 
-    <!-- Bottom: wallet, settings, logout -->
     <div class="sidebar-bottom">
       <div class="sidebar-divider" />
 
-      <!-- Wallet button — click to toggle popup -->
       <button
         class="sidebar-item sidebar-item--btn"
         :class="{ 'sidebar-item--active': isWalletOpen }"
@@ -47,7 +36,6 @@
         <span class="sidebar-label">Wallet</span>
       </button>
 
-      <!-- Wallet popup — visible only when sidebar is expanded and wallet is open -->
       <WalletPopup
         v-if="isWalletOpen && isExpanded"
         :address="dashboard.walletAddress"
@@ -88,10 +76,10 @@ async function handleLogout() {
 
 <style scoped>
 .sidebar {
-  width: 60px;
+  width: 64px;
   min-height: 100vh;
   background: #fff;
-  border-right: 1px solid #f0f0f0;
+  border-right: 1px solid #ebebeb;
   display: flex;
   flex-direction: column;
   padding: 12px 10px;
@@ -111,13 +99,38 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 2px;
+  padding: 6px 4px;
   margin-bottom: 8px;
+  text-decoration: none;
   overflow: hidden;
+  min-height: 44px;
 }
-.logo-img  { width: 36px; height: 36px; object-fit: contain; flex-shrink: 0; border-radius: 8px; }
-.logo-text { font-size: 15px; font-weight: 700; color: #1B2A6B; white-space: nowrap; opacity: 0; transition: opacity 0.15s; }
-.sidebar--expanded .logo-text { opacity: 1; }
+
+.logo-img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 8px;
+  /* Always visible */
+  display: block;
+}
+
+.logo-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1B2A6B;
+  white-space: nowrap;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.2s ease, width 0.2s ease;
+}
+
+.sidebar--expanded .logo-text {
+  opacity: 1;
+  width: auto;
+}
 
 /* Divider */
 .sidebar-divider { height: 1px; background: #f0f0f0; margin: 6px 0; }
@@ -132,7 +145,7 @@ async function handleLogout() {
   gap: 12px;
   padding: 10px;
   border-radius: 10px;
-  color: #888;
+  color: #444;
   cursor: pointer;
   transition: all 0.15s;
   border: none;
@@ -142,13 +155,36 @@ async function handleLogout() {
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
+  /* Icon always centered when collapsed */
+  justify-content: flex-start;
 }
-.sidebar-item:hover       { background: #f5f5f5; color: #534AB7; }
-.sidebar-item--active     { background: #EEEDFE; color: #534AB7; }
+
+.sidebar-item:hover { background: #f0effd; color: #534AB7; }
+
+.sidebar-item--active {
+  background: #EEEDFE;
+  color: #534AB7;
+  border-left: 3px solid #534AB7;
+  padding-left: 9px;
+}
 .sidebar-item--logout:hover { background: #fff0f0; color: #d32f2f; }
 
-.sidebar-label { font-size: 13px; font-weight: 500; opacity: 0; transition: opacity 0.15s; }
-.sidebar--expanded .sidebar-label { opacity: 1; }
+/* Label hidden by default, slides in when expanded */
+.sidebar-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: inherit;
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  transition: opacity 0.2s ease, width 0.2s ease;
+  white-space: nowrap;
+}
+
+.sidebar--expanded .sidebar-label {
+  opacity: 1;
+  width: auto;
+}
 
 /* Bottom sticks to bottom */
 .sidebar-bottom { margin-top: auto; display: flex; flex-direction: column; gap: 2px; position: relative; }
