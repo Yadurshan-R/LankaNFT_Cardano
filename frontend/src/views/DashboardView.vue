@@ -1,17 +1,6 @@
-<!-- ─────────────────────────────────────────────────────────────────────────
-  DashboardView.vue — LankaNFT main dashboard
-  
-  Layout:
-    Top:    page title + Create NFT button
-    Middle: 4 stat cards (Total, Minted, Listed, Pending)
-    Bottom: NFT grid (left) + Activity feed (right)
-    
-  Data: all from useDashboardStore — no local API calls
-──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <div class="dashboard">
 
-    <!-- Page header -->
     <div class="page-header">
       <div>
         <h1 class="page-title">Dashboard</h1>
@@ -25,7 +14,6 @@
       </router-link>
     </div>
 
-    <!-- Loading skeleton -->
     <template v-if="dashboard.isLoading">
       <div class="stats-row">
         <div v-for="n in 4" :key="n" class="skeleton skeleton--stat" />
@@ -36,17 +24,14 @@
       </div>
     </template>
 
-    <!-- Error -->
     <div v-else-if="dashboard.error" class="error-state">
       <AlertCircle :size="32" />
       <p>{{ dashboard.error }}</p>
       <button class="btn-retry" @click="dashboard.loadDashboard()">Try again</button>
     </div>
 
-    <!-- Content -->
     <template v-else>
 
-      <!-- 4 stat cards -->
       <div class="stats-row">
         <div class="stat-card">
           <div class="stat-icon stat-icon--purple"><Layers :size="18" /></div>
@@ -66,10 +51,8 @@
         </div>
       </div>
 
-      <!-- NFT grid + Activity feed -->
       <div class="main-grid">
 
-        <!-- Left: NFT panel -->
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title"><ImageIcon :size="15" /> My NFTs</div>
@@ -86,7 +69,6 @@
             </div>
           </div>
 
-          <!-- Empty state -->
           <div v-if="activeNFTs.length === 0" class="empty-state">
             <ImageIcon :size="40" color="#ddd" />
             <p class="empty-title">{{ emptyTitle }}</p>
@@ -98,7 +80,6 @@
             </router-link>
           </div>
 
-          <!-- NFT grid -->
           <div v-else class="nft-grid">
             <router-link
               v-for="nft in activeNFTs"
@@ -109,7 +90,6 @@
               <div class="nft-img">
                 <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="nft-img-actual" />
                 <ImageIcon v-else :size="28" color="#ddd" />
-                <!-- Hover overlay — hidden until card is hovered via CSS -->
                 <div class="nft-hover-overlay">
                   <span class="nft-hover-label">View details</span>
                 </div>
@@ -124,7 +104,6 @@
               </div>
             </router-link>
 
-            <!-- Shortcut: mint new -->
             <router-link to="/mint" class="nft-card nft-card--new">
               <Plus :size="22" />
               <span>Mint new</span>
@@ -132,7 +111,6 @@
           </div>
         </div>
 
-        <!-- Right: Activity panel -->
         <div class="panel panel--sticky">
           <div class="panel-header">
             <div class="panel-title"><Activity :size="15" /> Activity</div>
@@ -257,7 +235,7 @@ const recentActivity = computed(() => {
 
 function formatTime(dateStr: string): string {
   if (!dateStr) return ''
-  const diff    = Date.now() - new Date(dateStr).getTime()
+  const diff = Math.abs(Date.now() - new Date(dateStr).getTime())
   const minutes = Math.floor(diff / 60_000)
   const hours   = Math.floor(diff / 3_600_000)
   const days    = Math.floor(diff / 86_400_000)
