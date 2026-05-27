@@ -1,19 +1,10 @@
-<!-- ─────────────────────────────────────────────────────────────────────────
-  NFTDetailView.vue — LankaNFT individual NFT detail page
-
-  Layout: two columns — image + actions (left), metadata + blockchain info (right)
-  Actions: List for Sale, Transfer, Cancel listing (shown based on nft.status)
-  All script logic unchanged — only template and styles updated
-──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <div class="nft-detail">
 
-    <!-- Back link -->
     <router-link to="/" class="back-link">
       <ArrowLeft :size="14" /> Back to Dashboard
     </router-link>
 
-    <!-- Loading skeleton -->
     <div v-if="loading" class="detail-grid">
       <div class="skeleton skeleton--image" />
       <div class="sk-right">
@@ -24,20 +15,16 @@
       </div>
     </div>
 
-    <!-- Not found -->
     <div v-else-if="!nft" class="empty-state">
       <ImageIcon :size="40" color="#ddd" />
       <p class="empty-title">NFT not found</p>
       <router-link to="/"><button class="btn-primary">Go to Dashboard</button></router-link>
     </div>
 
-    <!-- Detail content -->
     <div v-else class="detail-grid">
 
-      <!-- ── Left: image + actions ── -->
       <div class="detail-left">
 
-        <!-- Image -->
         <div class="img-wrap">
           <img v-if="imageUrl" :src="imageUrl" :alt="nft.name" class="nft-img" />
           <div v-else class="nft-img-placeholder">
@@ -49,7 +36,6 @@
           </span>
         </div>
 
-        <!-- Cardanoscan link -->
         <a
           v-if="nft.tx_hash"
           :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
@@ -61,10 +47,8 @@
           View on Cardanoscan
         </a>
 
-        <!-- ── List for Sale (minted only) ── -->
         <div v-if="nft.status === 'minted'" class="action-section">
 
-          <!-- Success state -->
           <div v-if="listingConfirmed" class="confirmed-card confirmed-card--green">
             <div class="confirmed-header">
               <CheckCircle :size="16" />
@@ -84,7 +68,6 @@
             <p class="confirmed-note">Your NFT is now visible in Browse Mints.</p>
           </div>
 
-          <!-- List form -->
           <div v-else>
             <button v-if="!showListForm" class="btn-action btn-action--dark" @click="showListForm = true">
               <Tag :size="14" /> List for Sale
@@ -95,9 +78,8 @@
                 class="form-input" min="2" />
               <p class="form-hint">Minimum 2 ADA · You receive sale price minus royalties</p>
               <div class="form-actions">
-                <button class="btn-primary" :disabled="listing" @click="handleList">
-                  <Loader2 v-if="listing" :size="13" class="spin" />
-                  {{ listing ? 'Submitting...' : 'Confirm Listing' }}
+                <button class="btn-primary" :disabled="listing" @click="showListConfirm = true">
+                  Review & Confirm
                 </button>
                 <button class="btn-ghost" @click="showListForm = false">Cancel</button>
               </div>
@@ -106,10 +88,8 @@
           </div>
         </div>
 
-        <!-- ── Transfer (minted only) ── -->
         <div v-if="nft.status === 'minted'" class="action-section">
 
-          <!-- Transfer confirmed -->
           <div v-if="transferConfirmed" class="confirmed-card confirmed-card--purple">
             <div class="confirmed-header">
               <Send :size="14" /> NFT Sent Successfully
@@ -128,7 +108,6 @@
             <p class="confirmed-note">This NFT has been removed from your dashboard.</p>
           </div>
 
-          <!-- Transfer form -->
           <div v-else>
             <button v-if="!showTransferForm" class="btn-action btn-action--outline" @click="showTransferForm = true">
               <Send :size="14" /> Transfer NFT
@@ -155,7 +134,6 @@
           </div>
         </div>
 
-        <!-- Already listed notice -->
         <div v-if="nft.status === 'listed'" class="listed-notice">
           <Store :size="14" />
           This NFT is currently listed in the marketplace.
@@ -163,14 +141,11 @@
 
       </div>
 
-      <!-- ── Right: metadata ── -->
       <div class="detail-right">
 
-        <!-- Name + description -->
         <h1 class="detail-name">{{ nft.name }}</h1>
         <p v-if="nft.description" class="detail-desc">{{ nft.description }}</p>
 
-        <!-- Details table -->
         <div class="info-panel">
           <div class="info-panel-title">Details</div>
           <div class="info-row">
@@ -191,7 +166,6 @@
           </div>
         </div>
 
-        <!-- Policy ID -->
         <div v-if="nft.policy_id" class="info-panel">
           <div class="info-panel-title">Policy ID</div>
           <div class="copy-row">
@@ -203,7 +177,6 @@
           </div>
         </div>
 
-        <!-- Asset Name -->
         <div class="info-panel">
           <div class="info-panel-title">Asset Name</div>
           <div class="copy-row">
@@ -215,7 +188,6 @@
           </div>
         </div>
 
-        <!-- Transaction Hash -->
         <div v-if="nft.tx_hash" class="info-panel">
           <div class="info-panel-title">Transaction Hash</div>
           <div class="copy-row">
@@ -227,7 +199,6 @@
           </div>
         </div>
 
-        <!-- IPFS URI -->
         <div v-if="nft.image" class="info-panel">
           <div class="info-panel-title">IPFS Image</div>
           <a :href="nft.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')"
@@ -238,6 +209,16 @@
 
       </div>
     </div>
+
+    <ListConfirmModal
+      :show="showListConfirm"
+      :nft="nft"
+      :price="listPrice"
+      :loading="listing"
+      @confirm="handleList"
+      @cancel="showListConfirm = false"
+    />
+
   </div>
 </template>
 
@@ -252,6 +233,7 @@ import {
 import { useDashboardStore } from '@/stores/dashboard'
 import { createListing } from '@/services/listing'
 import { transferNFT } from '@/services/nft'
+import ListConfirmModal from '@/components/marketplace/ListConfirmModal.vue'
 
 const route     = useRoute()
 const dashboard = useDashboardStore()
@@ -259,13 +241,16 @@ const dashboard = useDashboardStore()
 const loading  = ref(true)
 const copied   = ref<string | null>(null)
 
+// ── State: Listing Flow ───────────────────────────────────────────────────
 const showListForm      = ref(false)
+const showListConfirm   = ref(false) // Controls visibility of the confirmation modal
 const listPrice         = ref(10)
 const listing           = ref(false)
 const listError         = ref('')
 const listingConfirmed  = ref(false)
 const listingTxHash     = ref('')
 
+// ── State: Transfer Flow ──────────────────────────────────────────────────
 const showTransferForm   = ref(false)
 const transferAddress    = ref('')
 const transferring       = ref(false)
@@ -273,6 +258,7 @@ const transferError      = ref('')
 const transferConfirmed  = ref(false)
 const transferTxHash     = ref('')
 
+// ── Computed Properties ───────────────────────────────────────────────────
 const nft = computed(() =>
   dashboard.nfts.find((n) => n.id === route.params.id)
 )
@@ -291,30 +277,47 @@ const formattedDate = computed(() => {
   })
 })
 
+// ── Methods ───────────────────────────────────────────────────────────────
+
+/** Copies data to clipboard and temporarily updates the icon */
 async function copy(text: string, key: string) {
   await navigator.clipboard.writeText(text)
   copied.value = key
   setTimeout(() => (copied.value = null), 2000)
 }
 
+/** * Handles the creation of an NFT marketplace listing. 
+ * Invoked by confirming the ListConfirmModal. 
+ */
 async function handleList() {
   if (!nft.value) return
-  if (listPrice.value < 2) { listError.value = 'Minimum price is 2 ADA'; return }
+  
+  // Guard against invalid prices. Dismiss modal so user can fix it on the form.
+  if (listPrice.value < 2) { 
+    listError.value = 'Minimum price is 2 ADA'
+    showListConfirm.value = false 
+    return 
+  }
+  
   listing.value = true
   listError.value = ''
+  
   try {
     const result = await createListing(nft.value.id, Math.floor(listPrice.value * 1_000_000))
     listingTxHash.value = result.tx_hash
     listingConfirmed.value = true
     showListForm.value = false
+    showListConfirm.value = false // Hide modal upon success
     await dashboard.loadDashboard()
   } catch (err: any) {
     listError.value = err.response?.data?.error || 'Failed to list NFT'
+    showListConfirm.value = false // Hide modal on error to display the message clearly
   } finally {
     listing.value = false
   }
 }
 
+/** Handles transferring an NFT to a different wallet */
 async function handleTransfer() {
   if (!nft.value) return
   if (!transferAddress.value.startsWith('addr')) {

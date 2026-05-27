@@ -162,6 +162,10 @@ const tabs = computed(() => [
   { key: 'pending', label: 'Pending', count: dashboard.pendingOnly.length },
 ])
 
+/**
+ * Computes the list of NFTs to display based on the currently selected tab.
+ * Falls back to the entire unique NFT collection if the tab key is not found.
+ */
 const activeNFTs = computed(() => {
   const map: Record<string, any[]> = {
     minted:  dashboard.mintedOnly,
@@ -190,7 +194,10 @@ const emptyDesc = computed(() => {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-// Convert ipfs:// URI to HTTP gateway URL for image rendering
+/**
+ * Converts a native IPFS URI (ipfs://...) to a public HTTP gateway URL for rendering in the browser.
+ * @param uri - The raw image URI from the NFT metadata.
+ */
 function ipfsToHttp(uri: string): string {
   if (!uri) return ''
   return uri.startsWith('ipfs://')
@@ -198,13 +205,21 @@ function ipfsToHttp(uri: string): string {
     : uri
 }
 
-// Return the listing price in ADA, or "Not listed"
+/**
+ * Determines the display price for an NFT.
+ * Searches the active listings store array for a match. If found, formats the lovelace value to ADA.
+ * @param nft - The NFT object being evaluated.
+ */
 function listingPrice(nft: any): string {
   if (nft.status !== 'listed') return 'Not listed'
+  
   const listing = dashboard.myListings.find(
     (l: any) => l.nft_id === nft.id && l.status === 'active'
   )
+  
   if (!listing) return 'Listed'
+  
+  // Convert lovelace to ADA and format with 2 decimal places
   const ada = (listing.price_lovelace / 1_000_000).toLocaleString('en-US', {
     minimumFractionDigits: 0, maximumFractionDigits: 2,
   })
@@ -212,16 +227,28 @@ function listingPrice(nft: any): string {
 }
 
 // ── Activity feed — derived from store data ───────────────────────────────
+
+/**
+ * Aggregates recent mints and listings into a single chronological activity feed.
+ * Takes the top 3 mints and top 2 active listings to create a dynamic sidebar preview.
+ */
 const recentActivity = computed(() => {
   const items: any[] = []
 
+  // Gather recent mints
   dashboard.uniqueNFTs.slice(0, 3).forEach((n: any) => {
+    // DEBUG: Output raw timestamp to console for debugging timezone issues
+    if (items.length === 0) {
+      console.log('created_at raw:', JSON.stringify(n.created_at), typeof n.created_at)
+    }
+    
     items.push({
       id: `mint-${n.id}`, type: 'minted',
       name: n.name, time: formatTime(n.created_at),
     })
   })
 
+  // Gather recent listings
   dashboard.myListings.filter((l: any) => l.status === 'active').slice(0, 2).forEach((l: any) => {
     const ada = (l.price_lovelace / 1_000_000).toFixed(0)
     items.push({
@@ -233,12 +260,26 @@ const recentActivity = computed(() => {
   return items.slice(0, 5)
 })
 
+/**
+ * Formats a local database timestamp string into a relative time (e.g., "5m ago").
+ * The DB string is in local time, so replacing the space with 'T' ensures it parses 
+ * correctly as an ISO string without mistakenly treating it as UTC.
+ * @param dateStr - The timestamp string from the database.
+ */
 function formatTime(dateStr: string): string {
   if (!dateStr) return ''
-  const diff = Math.abs(Date.now() - new Date(dateStr).getTime())
+  
+  // DB timestamps are in local time — parse as local, not UTC
+  const localStr = dateStr.toString().replace(' ', 'T')
+  const diff = Date.now() - new Date(localStr).getTime()
+  
+  if (diff < 0) return 'just now'
+  
   const minutes = Math.floor(diff / 60_000)
   const hours   = Math.floor(diff / 3_600_000)
   const days    = Math.floor(diff / 86_400_000)
+  
+  if (minutes < 2)  return 'just now'
   if (minutes < 60) return `${minutes}m ago`
   if (hours < 24)   return `${hours}h ago`
   return `${days}d ago`

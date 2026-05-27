@@ -17,9 +17,13 @@ import path from "path";
 
 const router = Router();
 
+// Load the compiled Aiken blueprint to extract the Plutus scripts
 const blueprintPath = path.join(__dirname, "../../plutus.json");
 const blueprintJson = JSON.parse(fs.readFileSync(blueprintPath, "utf-8"));
 
+/**
+ * Helper to safely extract a specific validator by title from the blueprint.
+ */
 function getValidator(title: string) {
   const v = blueprintJson.validators.find((v: any) => v.title === title);
   if (!v) throw new Error(`Validator "${title}" not found in plutus.json`);
@@ -28,12 +32,18 @@ function getValidator(title: string) {
 
 const marketplaceValidator = getValidator("marketplace.marketplace.spend");
 
+// Derive the marketplace script address from the compiled code
 const marketplaceAddress = serializePlutusScript(
   { code: applyCborEncoding(marketplaceValidator.compiledCode), version: "V3" },
   undefined,
   0
 ).address;
 
+/**
+ * Constructs the CBOR-encoded datum required by the marketplace smart contract.
+ * The datum stores the seller's address, the price, and the NFT details so the contract
+ * knows who to pay and how much when a buyer attempts to consume this UTxO.
+ */
 function buildListingDatum(
   sellerAddress: string,
   priceLovelace: number,
@@ -44,16 +54,20 @@ function buildListingDatum(
   const sellerPkh = resolvePaymentKeyHash(sellerAddress);
   const addrObj = deserializeAddress(sellerAddress);
 
+  // Plutus requires the address to be structured specifically (PaymentCredential, StakeCredential)
   let plutusSellerAddress;
   if (addrObj.stakeCredentialHash) {
+    // Address has a stake credential
     plutusSellerAddress = mConStr0([
       mConStr0([sellerPkh]),
       mConStr0([mConStr0([mConStr0([addrObj.stakeCredentialHash])])]),
     ]);
   } else {
+    // Address has no stake credential (enterprise address)
     plutusSellerAddress = mConStr0([mConStr0([sellerPkh]), mConStr1([])]);
   }
 
+  // Construct the full datum matching the Aiken custom type
   const datum = mConStr0([
     sellerPkh,
     plutusSellerAddress,
@@ -85,6 +99,11 @@ router.post("/list", async (req: Request, res: Response) => {
     });
 
     const utxos = await wallet.getUtxos();
+    
+    // DEBUG LOG: Verify the derived address and UTxO count
+    const debugAddress = await wallet.getChangeAddress();
+    console.log(`[LIST DEBUG] address: ${debugAddress}, utxos: ${utxos.length}`);
+    
     if (utxos.length === 0) {
       res.status(400).json({ error: "Wallet has no UTxOs" });
       return;
@@ -104,10 +123,11 @@ router.post("/list", async (req: Request, res: Response) => {
 
     const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
 
+    // Build the transaction: send the NFT to the marketplace script with the required datum
     const unsignedTx = await txBuilder
       .txOut(marketplaceAddress, [
         { unit: nft_unit, quantity: "1" },
-        { unit: "lovelace", quantity: "2000000" },
+        { unit: "lovelace", quantity: "3000000" }, // Min-ADA sent alongside the NFT
       ])
       .txOutInlineDatumValue(listingDatumCbor, "CBOR")
       .changeAddress(sellerAddress)
@@ -162,6 +182,7 @@ router.post("/buy", async (req: Request, res: Response) => {
     const utxos = await wallet.getUtxos();
     const buyerAddress = await wallet.getChangeAddress();
 
+    // Smart contract execution requires collateral. Find a pure ADA UTxO > 5 ADA.
     const collateralUtxo = utxos.find(
       (u) =>
         u.output.amount.length === 1 &&
@@ -208,7 +229,7 @@ router.post("/buy", async (req: Request, res: Response) => {
         listingUtxo.output.address
       )
       .txInInlineDatumPresent()
-      .txInRedeemerValue("d87980", "CBOR")
+      .txInRedeemerValue("d87980", "CBOR") // CBOR for the "Buy" redeemer action
       .txInScript(marketplaceScript)
       .txInCollateral(
         collateralUtxo.input.txHash,
@@ -317,7 +338,7 @@ router.post("/cancel", async (req: Request, res: Response) => {
         listingUtxo.output.address
       )
       .txInInlineDatumPresent()
-      .txInRedeemerValue("d87a80", "CBOR")
+      .txInRedeemerValue("d87a80", "CBOR") // CBOR for the "Cancel" redeemer action
       .txInScript(marketplaceScript)
       .txInCollateral(
         collateralUtxo.input.txHash,

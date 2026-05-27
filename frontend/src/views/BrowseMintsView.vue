@@ -1,14 +1,6 @@
-<!-- ─────────────────────────────────────────────────────────────────────────
-  BrowseMintsView.vue — LankaNFT marketplace browse page
-  
-  Shows all active listings with search, sort, and price filter.
-  Buy action calls the marketplace contract via the backend.
-  All filtering is client-side on the fetched listings array.
-──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <div class="browse">
 
-    <!-- Page header -->
     <div class="page-header">
       <div>
         <h1 class="page-title">Browse Mints</h1>
@@ -16,7 +8,6 @@
       </div>
     </div>
 
-    <!-- Search + filter bar -->
     <div class="filter-bar">
       <div class="search-wrap">
         <Search :size="15" class="search-icon" />
@@ -52,7 +43,6 @@
       </div>
     </div>
 
-    <!-- Loading skeleton -->
     <div v-if="loading" class="listings-grid">
       <div v-for="n in 8" :key="n" class="listing-card listing-card--skeleton">
         <div class="sk-image" />
@@ -64,7 +54,6 @@
       </div>
     </div>
 
-    <!-- Empty state -->
     <div v-else-if="filteredListings.length === 0" class="empty-state">
       <Store :size="40" color="#ddd" />
       <p class="empty-title">
@@ -83,14 +72,12 @@
       </router-link>
     </div>
 
-    <!-- Listings grid -->
     <div v-else class="listings-grid">
       <div
         v-for="listing in filteredListings"
         :key="listing.id"
         class="listing-card"
       >
-        <!-- Image with hover overlay -->
         <div class="listing-img-wrap">
           <img
             v-if="imageUrl(listing.image_ipfs)"
@@ -101,12 +88,11 @@
           <div v-else class="listing-img-placeholder">
             <ImageIcon :size="32" color="#ddd" />
           </div>
-          <!-- Hover overlay — hidden until card hovered via CSS -->
           <div class="listing-hover">
             <button
               class="listing-hover-btn"
               :disabled="buyingId === listing.id"
-              @click="handleBuy(listing)"
+              @click="confirmListing = listing"
             >
               <Loader2 v-if="buyingId === listing.id" :size="13" class="spin" />
               <ShoppingCart v-else :size="13" />
@@ -115,7 +101,6 @@
           </div>
         </div>
 
-        <!-- Card info -->
         <div class="listing-info">
           <div class="listing-name-row">
             <span class="listing-name">{{ listing.nft_name }}</span>
@@ -129,19 +114,23 @@
       </div>
     </div>
 
-    <!-- Results count -->
     <div v-if="!loading && listings.length > 0" class="results-count">
       {{ filteredListings.length }} of {{ listings.length }} listings
     </div>
 
-    <!-- Success toast -->
+    <BuyConfirmModal
+      :listing="confirmListing"
+      :loading="buyingId !== null"
+      @confirm="handleBuy(confirmListing)"
+      @cancel="closeConfirm"
+    />
+
     <Transition name="toast">
       <div v-if="successMsg" class="toast toast--success">
         <CheckCircle :size="15" /> {{ successMsg }}
       </div>
     </Transition>
 
-    <!-- Error toast -->
     <Transition name="toast">
       <div v-if="errorMsg" class="toast toast--error">
         <AlertCircle :size="15" /> {{ errorMsg }}
@@ -152,7 +141,6 @@
 </template>
 
 <script setup lang="ts">
-// All logic unchanged from original — only template and styles updated
 import { computed, onMounted, ref } from 'vue'
 import {
   AlertCircle, CheckCircle,
@@ -161,22 +149,33 @@ import {
   Store, X,
 } from 'lucide-vue-next'
 import { getAllListings, buyListing } from '@/services/listing'
+import BuyConfirmModal from '@/components/marketplace/BuyConfirmModal.vue'
 
-const listings  = ref<any[]>([])
-const loading   = ref(true)
-const buyingId  = ref<string | null>(null)
+// ── State ─────────────────────────────────────────────────────────────────
+const listings   = ref<any[]>([])
+const loading    = ref(true)
+const buyingId   = ref<string | null>(null)
 const successMsg = ref('')
 const errorMsg   = ref('')
+
+// Marketplace Buy Flow
+const confirmListing = ref<any | null>(null)
 
 // Filters
 const searchQuery = ref('')
 const sortBy      = ref('newest')
 const maxPrice    = ref<number | null>(null)
 
+// ── Computed Properties ───────────────────────────────────────────────────
+
+/** Determines if any active filters are applied to show the 'Clear' button */
 const hasFilters = computed(() =>
   searchQuery.value.trim() !== '' || maxPrice.value !== null
 )
 
+/** * Filters and sorts the fetched listings based on the user's input.
+ * Handled entirely client-side for immediate responsiveness.
+ */
 const filteredListings = computed(() => {
   let result = [...listings.value]
 
@@ -195,13 +194,25 @@ const filteredListings = computed(() => {
   return result
 })
 
+// ── Methods ───────────────────────────────────────────────────────────────
+
+/** Resets all search and filter parameters to their default states */
 function clearFilters() {
   searchQuery.value = ''
   sortBy.value      = 'newest'
   maxPrice.value    = null
 }
 
-// Convert ipfs:// URI to HTTP gateway URL
+/**
+ * Closes the purchase confirmation modal by clearing the selected listing.
+ */
+function closeConfirm() {
+  confirmListing.value = null
+}
+
+/**
+ * Converts a native IPFS URI (ipfs://...) to a public HTTP gateway URL for rendering.
+ */
 function imageUrl(ipfs: string): string | undefined {
   if (!ipfs) return undefined
   return ipfs.startsWith('ipfs://')
@@ -209,7 +220,7 @@ function imageUrl(ipfs: string): string | undefined {
     : ipfs
 }
 
-// Convert lovelace to ADA string
+/** Formats a lovelace integer into a standard ADA decimal string */
 function adaAmount(lovelace: number): string {
   return (lovelace / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
@@ -224,12 +235,20 @@ function showError(msg: string) {
   setTimeout(() => (errorMsg.value = ''), 4000)
 }
 
+/**
+ * Executes the purchase of the selected NFT.
+ * Called when the user clicks 'Confirm' within the BuyConfirmModal.
+ * @param listing - The NFT listing object to purchase.
+ */
 async function handleBuy(listing: any) {
+  if (!listing) return
   buyingId.value = listing.id
   try {
     const result = await buyListing(listing.id)
     showSuccess(`NFT purchased! TX: ${result.tx_hash.slice(0, 16)}...`)
+    // Remove the purchased item from the local UI
     listings.value = listings.value.filter((l) => l.id !== listing.id)
+    closeConfirm()
   } catch (err: any) {
     const raw = err.response?.data?.error || ''
     const friendly = raw.includes('Insufficient input')
