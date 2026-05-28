@@ -33,19 +33,31 @@
     <template v-else>
 
       <div class="stats-row">
-        <div class="stat-card">
+        <div
+          :class="['stat-card', { 'stat-card--active': activeTab === 'all' }]"
+          @click="activeTab = 'all'"
+        >
           <div class="stat-icon stat-icon--purple"><Layers :size="18" /></div>
           <div><div class="stat-num">{{ dashboard.uniqueNFTs.length }}</div><div class="stat-lbl">Total NFTs</div></div>
         </div>
-        <div class="stat-card">
+        <div
+          :class="['stat-card', { 'stat-card--active': activeTab === 'minted' }]"
+          @click="activeTab = 'minted'"
+        >
           <div class="stat-icon stat-icon--green"><CheckCircle :size="18" /></div>
           <div><div class="stat-num">{{ dashboard.mintedOnly.length }}</div><div class="stat-lbl">Minted</div></div>
         </div>
-        <div class="stat-card">
+        <div
+          :class="['stat-card', { 'stat-card--active': activeTab === 'listed' }]"
+          @click="activeTab = 'listed'"
+        >
           <div class="stat-icon stat-icon--blue"><Tag :size="18" /></div>
           <div><div class="stat-num">{{ dashboard.listedOnly.length }}</div><div class="stat-lbl">Listed</div></div>
         </div>
-        <div class="stat-card">
+        <div
+          :class="['stat-card', { 'stat-card--active': activeTab === 'pending' }]"
+          @click="activeTab = 'pending'"
+        >
           <div class="stat-icon stat-icon--amber"><Clock :size="18" /></div>
           <div><div class="stat-num">{{ dashboard.pendingOnly.length }}</div><div class="stat-lbl">Pending</div></div>
         </div>
@@ -56,59 +68,134 @@
         <div class="panel">
           <div class="panel-header">
             <div class="panel-title"><ImageIcon :size="15" /> My NFTs</div>
-            <div class="filter-tabs">
-              <button
-                v-for="tab in tabs"
-                :key="tab.key"
-                :class="['filter-tab', { 'filter-tab--active': activeTab === tab.key }]"
-                @click="activeTab = tab.key"
-              >
-                {{ tab.label }}
-                <span class="tab-count">{{ tab.count }}</span>
-              </button>
+            <button v-if="activeTab !== null" class="view-all" @click="activeTab = null">
+              ← Back
+            </button>
+          </div>
+
+          <div v-if="activeTab === null" class="album-grid">
+
+            <div class="album-card" @click="activeTab = 'all'">
+              <div class="album-preview">
+                <div
+                  v-for="nft in dashboard.uniqueNFTs.slice(0, 4)"
+                  :key="nft.id"
+                  class="album-thumb"
+                >
+                  <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="album-img" />
+                  <div v-else class="album-img-empty"><ImageIcon :size="16" color="#ccc" /></div>
+                </div>
+                <div
+                  v-for="n in Math.max(0, 4 - dashboard.uniqueNFTs.length)"
+                  :key="`empty-all-${n}`"
+                  class="album-thumb album-thumb--empty"
+                />
+              </div>
+              <div class="album-info">
+                <span class="album-name">All NFTs</span>
+                <span class="album-count">{{ dashboard.uniqueNFTs.length }}</span>
+              </div>
             </div>
-          </div>
 
-          <div v-if="activeNFTs.length === 0" class="empty-state">
-            <ImageIcon :size="40" color="#ddd" />
-            <p class="empty-title">{{ emptyTitle }}</p>
-            <p class="empty-desc">{{ emptyDesc }}</p>
-            <router-link v-if="activeTab === 'all'" to="/mint">
-              <button class="btn-create">
-                <Plus :size="14" /> Mint your first NFT
-              </button>
-            </router-link>
-          </div>
-
-          <div v-else class="nft-grid">
-            <router-link
-              v-for="nft in activeNFTs"
-              :key="nft.id"
-              :to="`/nft/${nft.id}`"
-              class="nft-card"
-            >
-              <div class="nft-img">
-                <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="nft-img-actual" />
-                <ImageIcon v-else :size="28" color="#ddd" />
-                <div class="nft-hover-overlay">
-                  <span class="nft-hover-label">View details</span>
+            <div class="album-card" @click="activeTab = 'minted'">
+              <div class="album-preview">
+                <div
+                  v-for="nft in dashboard.mintedOnly.slice(0, 4)"
+                  :key="nft.id"
+                  class="album-thumb"
+                >
+                  <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="album-img" />
+                  <div v-else class="album-img-empty"><ImageIcon :size="16" color="#ccc" /></div>
                 </div>
+                <div
+                  v-for="n in Math.max(0, 4 - dashboard.mintedOnly.length)"
+                  :key="`empty-minted-${n}`"
+                  class="album-thumb album-thumb--empty"
+                />
               </div>
-              <div class="nft-info">
-                <div class="nft-name-row">
-                  <span class="nft-name">{{ nft.name }}</span>
-                  <span :class="['nft-badge', `nft-badge--${nft.status}`]">{{ nft.status }}</span>
-                </div>
-                <div class="nft-royalty">{{ nft.royalties }}% royalty</div>
-                <div class="nft-price">{{ listingPrice(nft) }}</div>
+              <div class="album-info">
+                <span class="album-name">Minted</span>
+                <span class="album-count">{{ dashboard.mintedOnly.length }}</span>
               </div>
-            </router-link>
+            </div>
 
-            <router-link to="/mint" class="nft-card nft-card--new">
-              <Plus :size="22" />
-              <span>Mint new</span>
-            </router-link>
+            <div class="album-card" @click="activeTab = 'listed'">
+              <div class="album-preview">
+                <div
+                  v-for="nft in dashboard.listedOnly.slice(0, 4)"
+                  :key="nft.id"
+                  class="album-thumb"
+                >
+                  <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="album-img" />
+                  <div v-else class="album-img-empty"><ImageIcon :size="16" color="#ccc" /></div>
+                </div>
+                <div
+                  v-for="n in Math.max(0, 4 - dashboard.listedOnly.length)"
+                  :key="`empty-listed-${n}`"
+                  class="album-thumb album-thumb--empty"
+                />
+              </div>
+              <div class="album-info">
+                <span class="album-name">Listed</span>
+                <span class="album-count">{{ dashboard.listedOnly.length }}</span>
+              </div>
+            </div>
+
+            <div class="album-card" @click="activeTab = 'pending'">
+              <div class="album-preview">
+                <div
+                  v-for="nft in dashboard.pendingOnly.slice(0, 4)"
+                  :key="nft.id"
+                  class="album-thumb"
+                >
+                  <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="album-img" />
+                  <div v-else class="album-img-empty"><Clock :size="16" color="#ccc" /></div>
+                </div>
+                <div
+                  v-for="n in Math.max(0, 4 - dashboard.pendingOnly.length)"
+                  :key="`empty-pending-${n}`"
+                  class="album-thumb album-thumb--empty"
+                />
+              </div>
+              <div class="album-info">
+                <span class="album-name">Pending</span>
+                <span class="album-count">{{ dashboard.pendingOnly.length }}</span>
+              </div>
+            </div>
+
           </div>
+
+          <template v-else>
+            <div v-if="activeNFTs.length === 0" class="empty-state">
+              <ImageIcon :size="40" color="#ddd" />
+              <p class="empty-title">{{ emptyTitle }}</p>
+              <p class="empty-desc">{{ emptyDesc }}</p>
+              <router-link v-if="activeTab === 'all'" to="/mint">
+                <button class="btn-create"><Plus :size="14" /> Mint your first NFT</button>
+              </router-link>
+            </div>
+            <div v-else class="nft-grid">
+              <router-link
+                v-for="nft in activeNFTs"
+                :key="nft.id"
+                :to="`/nft/${nft.id}`"
+                class="nft-card"
+              >
+                <div class="nft-img">
+                  <img v-if="nft.image" :src="ipfsToHttp(nft.image)" :alt="nft.name" class="nft-img-actual" />
+                  <ImageIcon v-else :size="28" color="#ddd" />
+                  <div class="nft-hover-overlay">
+                    <span :class="['nft-badge', `nft-badge--${nft.status}`]">{{ nft.status }}</span>
+                    <span class="nft-hover-name">{{ nft.name }}</span>
+                    <span class="nft-hover-price">{{ listingPrice(nft) }}</span>
+                  </div>
+                </div>
+              </router-link>
+              <router-link to="/mint" class="nft-card nft-card--new">
+                <Plus :size="22" /><span>Mint new</span>
+              </router-link>
+            </div>
+          </template>
         </div>
 
         <div class="panel panel--sticky">
@@ -152,9 +239,8 @@ import {
 import { useDashboardStore } from '@/stores/dashboard'
 
 const dashboard = useDashboardStore()
-const activeTab  = ref('all')
+const activeTab  = ref<string | null>(null)
 
-// ── Tabs ──────────────────────────────────────────────────────────────────
 const tabs = computed(() => [
   { key: 'all',     label: 'All',     count: dashboard.uniqueNFTs.length },
   { key: 'minted',  label: 'Minted',  count: dashboard.mintedOnly.length },
@@ -162,25 +248,21 @@ const tabs = computed(() => [
   { key: 'pending', label: 'Pending', count: dashboard.pendingOnly.length },
 ])
 
-/**
- * Computes the list of NFTs to display based on the currently selected tab.
- * Falls back to the entire unique NFT collection if the tab key is not found.
- */
 const activeNFTs = computed(() => {
   const map: Record<string, any[]> = {
+    all:     dashboard.uniqueNFTs,
     minted:  dashboard.mintedOnly,
     listed:  dashboard.listedOnly,
     pending: dashboard.pendingOnly,
   }
-  return map[activeTab.value] ?? dashboard.uniqueNFTs
+  return map[activeTab.value ?? 'all'] ?? dashboard.uniqueNFTs
 })
 
-// ── Empty state text ──────────────────────────────────────────────────────
 const emptyTitle = computed(() => {
   const map: Record<string, string> = {
     minted: 'No minted NFTs', listed: 'No listed NFTs', pending: 'No pending NFTs',
   }
-  return map[activeTab.value] ?? 'No NFTs yet'
+  return map[activeTab.value ?? 'all'] ?? 'No NFTs yet'
 })
 
 const emptyDesc = computed(() => {
@@ -189,15 +271,9 @@ const emptyDesc = computed(() => {
     listed:  'List an NFT for sale from its detail page.',
     pending: 'NFTs being confirmed will appear here.',
   }
-  return map[activeTab.value] ?? 'Start by minting your first NFT on Cardano.'
+  return map[activeTab.value ?? 'all'] ?? 'Start by minting your first NFT on Cardano.'
 })
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Converts a native IPFS URI (ipfs://...) to a public HTTP gateway URL for rendering in the browser.
- * @param uri - The raw image URI from the NFT metadata.
- */
 function ipfsToHttp(uri: string): string {
   if (!uri) return ''
   return uri.startsWith('ipfs://')
@@ -205,11 +281,6 @@ function ipfsToHttp(uri: string): string {
     : uri
 }
 
-/**
- * Determines the display price for an NFT.
- * Searches the active listings store array for a match. If found, formats the lovelace value to ADA.
- * @param nft - The NFT object being evaluated.
- */
 function listingPrice(nft: any): string {
   if (nft.status !== 'listed') return 'Not listed'
   
@@ -219,36 +290,22 @@ function listingPrice(nft: any): string {
   
   if (!listing) return 'Listed'
   
-  // Convert lovelace to ADA and format with 2 decimal places
   const ada = (listing.price_lovelace / 1_000_000).toLocaleString('en-US', {
     minimumFractionDigits: 0, maximumFractionDigits: 2,
   })
   return `${ada} ₳`
 }
 
-// ── Activity feed — derived from store data ───────────────────────────────
-
-/**
- * Aggregates recent mints and listings into a single chronological activity feed.
- * Takes the top 3 mints and top 2 active listings to create a dynamic sidebar preview.
- */
 const recentActivity = computed(() => {
   const items: any[] = []
 
-  // Gather recent mints
   dashboard.uniqueNFTs.slice(0, 3).forEach((n: any) => {
-    // DEBUG: Output raw timestamp to console for debugging timezone issues
-    if (items.length === 0) {
-      console.log('created_at raw:', JSON.stringify(n.created_at), typeof n.created_at)
-    }
-    
     items.push({
       id: `mint-${n.id}`, type: 'minted',
       name: n.name, time: formatTime(n.created_at),
     })
   })
 
-  // Gather recent listings
   dashboard.myListings.filter((l: any) => l.status === 'active').slice(0, 2).forEach((l: any) => {
     const ada = (l.price_lovelace / 1_000_000).toFixed(0)
     items.push({
@@ -262,23 +319,17 @@ const recentActivity = computed(() => {
 
 /**
  * Formats a local database timestamp string into a relative time (e.g., "5m ago").
- * The DB string is in local time, so replacing the space with 'T' ensures it parses 
- * correctly as an ISO string without mistakenly treating it as UTC.
- * @param dateStr - The timestamp string from the database.
  */
 function formatTime(dateStr: string): string {
   if (!dateStr) return ''
-  
-  // DB timestamps are in local time — parse as local, not UTC
-  const localStr = dateStr.toString().replace(' ', 'T')
-  const diff = Date.now() - new Date(localStr).getTime()
-  
+  // Normalize: replace space separator, then ensure UTC suffix
+  let s = dateStr.toString().replace(' ', 'T')
+  if (!s.endsWith('Z') && !s.includes('+')) s += 'Z'
+  const diff = Date.now() - new Date(s).getTime()
   if (diff < 0) return 'just now'
-  
   const minutes = Math.floor(diff / 60_000)
   const hours   = Math.floor(diff / 3_600_000)
   const days    = Math.floor(diff / 86_400_000)
-  
   if (minutes < 2)  return 'just now'
   if (minutes < 60) return `${minutes}m ago`
   if (hours < 24)   return `${hours}h ago`
@@ -315,7 +366,20 @@ onMounted(() => dashboard.loadDashboard())
 
 /* Stats */
 .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: #fff; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; border: 1px solid #f0f0f0; }
+.stat-card {
+  background: #fff; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; border: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.stat-card:hover {
+  border-color: #534AB7;
+  transform: translateY(-1px);
+}
+.stat-card--active {
+  border-color: #534AB7;
+  background: #EEEDFE;
+}
+.stat-card--active .stat-lbl { color: #534AB7; }
 .stat-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .stat-icon--purple { background: #EEEDFE; color: #534AB7; }
 .stat-icon--green  { background: #E1F5EE; color: #085041; }
@@ -333,42 +397,141 @@ onMounted(() => dashboard.loadDashboard())
 .panel-header  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .panel-title   { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .panel-title svg { color: #534AB7; }
-.view-all      { font-size: 11px; color: #534AB7; font-weight: 500; }
+.view-all      { font-size: 11px; color: #534AB7; font-weight: 500; background: none; border: none; cursor: pointer; padding: 4px; border-radius: 6px; transition: background 0.15s; }
+.view-all:hover { background: #EEEDFE; }
 
-/* Filter tabs */
-.filter-tabs       { display: flex; gap: 4px; }
-.filter-tab        { display: flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; border: 1px solid #e8e8e8; background: transparent; color: #888; cursor: pointer; transition: all 0.15s; }
-.filter-tab:hover  { border-color: #534AB7; color: #534AB7; }
-.filter-tab--active { background: #534AB7; color: #fff; border-color: #534AB7; }
-.tab-count         { font-size: 10px; background: #f0f0f0; color: #666; padding: 0 4px; border-radius: 8px; }
-.filter-tab--active .tab-count { background: rgba(255,255,255,0.25); color: #fff; }
+/* ── Album grid — iOS Photos style ── */
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
 
-/* NFT grid */
-.nft-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 12px; }
+.album-card {
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #f0f0f0;
+  transition: all 0.15s;
+}
+.album-card:hover {
+  border-color: #534AB7;
+  transform: translateY(-2px);
+}
 
-.nft-card { border: 1px solid #f0f0f0; border-radius: 12px; overflow: hidden; cursor: pointer; text-decoration: none; color: inherit; display: block; transition: all 0.15s; }
-.nft-card:hover { border-color: #534AB7; transform: translateY(-2px); }
+/* 2x2 preview grid inside each album */
+.album-preview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  aspect-ratio: 4/3;
+  background: #e8e8e8;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+}
 
-/* Image — hover overlay is hidden by default, shown on card hover via parent selector */
-.nft-img              { aspect-ratio: 1; background: #f8f8f8; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
-.nft-img-actual       { width: 100%; height: 100%; object-fit: cover; }
-.nft-hover-overlay    { position: absolute; inset: 0; background: rgba(83,74,183,0.88); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s; }
+.album-thumb {
+  overflow: hidden;
+  background: #f5f5f5;
+}
+.album-thumb--empty { background: #f0f0f0; }
+
+.album-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.album-img-empty {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.album-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #fff;
+}
+.album-name  { font-size: 12px; font-weight: 600; color: #111; }
+.album-count { font-size: 11px; color: #888; }
+
+/* NFT grid — gallery style */
+.nft-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+}
+
+.nft-card {
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: all 0.15s;
+  aspect-ratio: 1;
+  position: relative;
+}
+.nft-card:hover { transform: scale(1.02); z-index: 1; }
+
+.nft-img {
+  width: 100%; height: 100%;
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.nft-img-actual { width: 100%; height: 100%; object-fit: cover; }
+
+/* Hover overlay — hidden by default, visible on hover */
+.nft-hover-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0) 50%);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 10px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  gap: 3px;
+}
 .nft-card:hover .nft-hover-overlay { opacity: 1; }
-.nft-hover-label      { background: #fff; color: #534AB7; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; }
 
-.nft-info    { padding: 10px 12px; }
-.nft-name-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 3px; }
-.nft-name    { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.nft-badge   { font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+.nft-badge {
+  font-size: 9px; font-weight: 600;
+  padding: 2px 6px; border-radius: 20px;
+  white-space: nowrap; align-self: flex-start;
+}
 .nft-badge--minted  { background: #E1F5EE; color: #085041; }
 .nft-badge--listed  { background: #EEEDFE; color: #534AB7; }
 .nft-badge--pending { background: #FFF8E1; color: #7a5c00; }
-.nft-royalty { font-size: 10px; color: #aaa; margin-bottom: 3px; }
-.nft-price   { font-size: 12px; font-weight: 600; color: #534AB7; }
+
+.nft-hover-name {
+  font-size: 12px; font-weight: 600;
+  color: #fff; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.nft-hover-price {
+  font-size: 11px; color: rgba(255,255,255,0.8);
+}
 
 /* Mint new card */
-.nft-card--new { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 130px; border: 1.5px dashed #e0e0e0; color: #ccc; gap: 6px; font-size: 11px; font-weight: 500; }
-.nft-card--new:hover { border-color: #534AB7; color: #534AB7; transform: none; }
+.nft-card--new {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  border: 1.5px dashed #e0e0e0;
+  color: #ccc; gap: 6px;
+  font-size: 11px; font-weight: 500;
+  background: #fafafa;
+}
+.nft-card--new:hover {
+  border-color: #534AB7; color: #534AB7;
+  transform: none; background: #EEEDFE;
+}
 
 /* Activity */
 .activity-list  { display: flex; flex-direction: column; }

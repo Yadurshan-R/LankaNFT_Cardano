@@ -1,9 +1,8 @@
 <template>
   <div class="upload-section">
     <h3 class="section-num"><span>1</span> Upload Asset</h3>
-    <p class="section-sub">PNG, JPG, GIF, MP4, MP3, GLB. Max size 100MB.</p>
+    <p class="section-sub">PNG, JPG, GIF, MP4, MP3, GLB. Max size 10MB.</p>
 
-    <!-- Drop zone -->
     <div
       class="drop-zone"
       :class="{ 'drop-zone--active': isDragging, 'drop-zone--filled': previewUrl }"
@@ -12,10 +11,8 @@
       @drop.prevent="handleDrop"
       @click="triggerInput"
     >
-      <!-- Preview -->
       <img v-if="previewUrl" :src="previewUrl" class="preview-img" alt="NFT preview" />
 
-      <!-- Placeholder -->
       <div v-else class="drop-placeholder">
         <div class="upload-icon">↑</div>
         <p class="drop-text">Drag & drop your file here</p>
@@ -31,8 +28,11 @@
       @change="handleFileChange"
     />
 
-    <!-- File info -->
-    <p v-if="fileName" class="file-name">{{ fileName }}</p>
+    <div class="file-info-container">
+      <p v-if="fileName" class="file-name">{{ fileName }}</p>
+      <p v-if="fileError"   class="file-msg file-msg--error">{{ fileError }}</p>
+      <p v-if="fileWarning" class="file-msg file-msg--warn">{{ fileWarning }}</p>
+    </div>
   </div>
 </template>
 
@@ -45,6 +45,14 @@ const isDragging = ref(false)
 const previewUrl = ref<string | null>(null)
 const fileName = ref<string | null>(null)
 const inputRef = ref<HTMLInputElement | null>(null)
+
+// Validation state
+const fileError   = ref('')
+const fileWarning = ref('')
+
+// Recommended limits
+const MAX_FILE_SIZE_MB = 10          // Hard reject above this
+const WARN_FILE_SIZE_MB = 2          // Show warning but allow above this
 
 function triggerInput() {
   inputRef.value?.click()
@@ -63,6 +71,25 @@ function handleDrop(e: DragEvent) {
 
 function processFile(file: File) {
   fileName.value = file.name
+  
+  const sizeMB = file.size / 1024 / 1024
+
+  // Hard reject — matches backend MaxFileSizeBytes
+  if (sizeMB > MAX_FILE_SIZE_MB) {
+    fileError.value = `File too large (${sizeMB.toFixed(1)}MB). Maximum is ${MAX_FILE_SIZE_MB}MB. Please compress your image.`
+    fileWarning.value = ''
+    previewUrl.value = null // clear preview if rejected
+    return
+  }
+
+  // Soft warning — upload will work but may be slow
+  if (sizeMB > WARN_FILE_SIZE_MB) {
+    fileWarning.value = `Large file (${sizeMB.toFixed(1)}MB). Upload may take up to 2 minutes. For best results, keep images under 2MB.`
+  } else {
+    fileWarning.value = ''
+  }
+
+  fileError.value = ''
   emit('file-selected', file)
 
   // Show image preview
@@ -72,6 +99,8 @@ function processFile(file: File) {
       previewUrl.value = e.target?.result as string
     }
     reader.readAsDataURL(file)
+  } else {
+    previewUrl.value = null
   }
 }
 </script>
@@ -117,5 +146,11 @@ function processFile(file: File) {
 .drop-text { font-size: 14px; color: #333; font-weight: 500; }
 .drop-link { font-size: 13px; color: #534AB7; margin-top: 4px; }
 .preview-img { max-height: 200px; max-width: 100%; border-radius: 8px; object-fit: contain; }
-.file-name { font-size: 12px; color: #666; margin-top: 8px; }
+
+/* File info & Validation styling */
+.file-info-container { margin-top: 8px; }
+.file-name { font-size: 12px; color: #666; margin: 0; }
+.file-msg          { font-size: 12px; margin-top: 6px; }
+.file-msg--error   { color: #d32f2f; }
+.file-msg--warn    { color: #854F0B; }
 </style>

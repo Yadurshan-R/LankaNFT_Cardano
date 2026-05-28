@@ -40,20 +40,23 @@ const router = createRouter({
       component: () => import('@/views/NFTDetailView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/activity',
+      name: 'activity',
+      component: () => import('@/views/ActivityView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-
   if (!auth.isAuthenticated && !auth.checked) {
     await auth.checkAuth()
   }
-
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'auth' }
   }
-
   if (to.meta.requiresGuest && auth.isAuthenticated) {
     return { name: 'dashboard' }
   }

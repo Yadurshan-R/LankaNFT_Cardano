@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"NFT_Minting_Platform/pkg/blockchain"
 
@@ -50,8 +51,18 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 
 // CreateListing godoc
 // POST /api/listing/create
+//
 // Lists an NFT for sale on the marketplace.
-// Prevents duplicate listings — an NFT can only have one active listing at a time.
+//
+// Safety guarantees:
+//  1. NFT must be in 'minted' status — prevents listing already-listed NFTs
+//  2. Stale active listings for the same NFT are auto-cancelled in the DB
+//     before the new listing is created. This handles cases where a previous
+//     listing tx succeeded on-chain but the app crashed before updating DB
+//     status, leaving a ghost 'active' record pointing to a spent UTxO.
+//  3. Minimum price enforced at 2 ADA — below this the min-ADA UTxO
+//     requirement makes the listing economically invalid.
+//
 // Body: { nft_id, price_lovelace }
 func (h *Handler) CreateListing(c *gin.Context) {
 	userID := c.GetString("user_id")
@@ -66,15 +77,13 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		return
 	}
 
-	// Minimum price is 2 ADA — below this the min-ADA UTxO requirement
-	// makes the listing economically invalid
 	if body.PriceLovelace < 2_000_000 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "minimum price is 2 ADA (2000000 lovelace)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "minimum listing price is 2 ADA (2,000,000 lovelace)"})
 		return
 	}
 
-	// Verify the NFT exists, belongs to this user, and is in 'minted' status
-	// 'listed' status means it is already on the marketplace — reject duplicates
+	// Verify the NFT exists, belongs to this user, and is in 'minted' status.
+	// 'listed' status means it is already on the marketplace.
 	var policyID, assetName, userTokenName string
 	err := h.service.db.QueryRow(c.Request.Context(), `
 		SELECT policy_id, asset_name, user_token_name
@@ -82,50 +91,50 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		WHERE id = $1 AND owner_id = $2 AND status = 'minted'
 	`, body.NFTID, userID).Scan(&policyID, &assetName, &userTokenName)
 	if err != nil {
-		// Check if the NFT exists but is already listed
+		// Distinguish between "not found" and "wrong status" for a clear error message
 		var existingStatus string
 		statusErr := h.service.db.QueryRow(c.Request.Context(), `
 			SELECT status FROM nfts WHERE id = $1 AND owner_id = $2
 		`, body.NFTID, userID).Scan(&existingStatus)
+
 		if statusErr == nil && existingStatus == "listed" {
 			c.JSON(http.StatusConflict, gin.H{
-				"error": "this NFT is already listed for sale. Cancel the existing listing first.",
+				"error": "this NFT is already listed for sale — cancel the existing listing first",
 			})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not minted yet"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not in a listable state"})
 		return
 	}
 
-	// Extra safety check — verify no active listing exists for this NFT in the DB
-	// This catches edge cases where status update failed but listing was created
-	var existingListingCount int
-	h.service.db.QueryRow(c.Request.Context(), `
-		SELECT COUNT(*) FROM listings WHERE nft_id = $1 AND status = 'active'
-	`, body.NFTID).Scan(&existingListingCount)
-	if existingListingCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "this NFT already has an active listing. Cancel it before creating a new one.",
-		})
-		return
+	// Auto-cancel any stale active listings for this NFT.
+	//
+	// A stale listing exists when: a previous listing tx went through on-chain,
+	// the NFT left the wallet, but the DB was never updated (app crash, timeout).
+	// This leaves ghost 'active' records pointing to already-spent UTxOs.
+	// When we create a fresh listing, those old records are meaningless —
+	// marking them 'stale' prevents cancel from trying to spend a non-existent UTxO.
+	_, err = h.service.db.Exec(c.Request.Context(), `
+		UPDATE listings
+		SET status = 'stale', updated_at = NOW()
+		WHERE nft_id = $1 AND status = 'active'
+	`, body.NFTID)
+	if err != nil {
+		// Non-fatal — log and continue. Stale records are a UX issue, not a blocker.
+		log.Printf("[LISTING] Warning: failed to clear stale listings for NFT %s: %v", body.NFTID, err)
 	}
 
-	// For single NFTs, royalty policy ID is the same as the minting policy
+	// For single NFTs, the royalty policy is the same as the minting policy
 	royaltyPolicyID := policyID
 
-	// Decrypt and load the seller's custodial wallet mnemonic
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
 		return
 	}
 
-	// Convert DB token name to on-chain hex unit
-	// DB stores: "001bc280" + rawName (e.g. "aa")
-	// On-chain:  "001bc280" + hex(rawName) (e.g. "6161")
 	nftUnit := buildNFTUnit(policyID, userTokenName)
 
-	// Call the blockchain sidecar to build and submit the listing transaction
 	result, err := h.service.blockchainClient.ListNFT(blockchain.ListNFTRequest{
 		Mnemonic:        mnemonic,
 		NFTUnit:         nftUnit,
@@ -137,7 +146,6 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		return
 	}
 
-	// Store the listing in the DB and update NFT status to 'listed'
 	listingID, err := h.service.CreateListing(
 		c.Request.Context(),
 		body.NFTID, userID,
@@ -151,7 +159,7 @@ func (h *Handler) CreateListing(c *gin.Context) {
 		return
 	}
 
-	log.Printf("NFT listed — listing: %s, tx: %s", listingID, result.TxHash)
+	log.Printf("[LISTING] NFT listed — listing: %s, nft: %s, tx: %s", listingID, body.NFTID, result.TxHash)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":             "NFT listed successfully",
@@ -350,8 +358,9 @@ func (h *Handler) GetMyListings(c *gin.Context) {
 	userID := c.GetString("user_id")
 
 	rows, err := h.service.db.Query(c.Request.Context(), `
-		SELECT l.id, l.script_utxo, l.price_lovelace,
+		SELECT l.id, l.nft_id, l.script_utxo, l.price_lovelace,
 		       l.nft_policy_id, l.nft_asset_name, l.status,
+		       l.created_at,
 		       n.nft_name, n.image_ipfs
 		FROM listings l
 		JOIN nfts n ON n.id = l.nft_id
@@ -366,32 +375,34 @@ func (h *Handler) GetMyListings(c *gin.Context) {
 
 	var listings []map[string]interface{}
 	for rows.Next() {
-		var id, scriptUTxO, nftPolicyID, nftAssetName, status string
+		var id, nftID, scriptUTxO, nftPolicyID, nftAssetName, status string
 		var nftName, imageIPFS string
 		var priceLovelace int64
+		var createdAt time.Time
 		if err := rows.Scan(
-			&id, &scriptUTxO, &priceLovelace,
+			&id, &nftID, &scriptUTxO, &priceLovelace,
 			&nftPolicyID, &nftAssetName, &status,
+			&createdAt,
 			&nftName, &imageIPFS,
 		); err != nil {
 			continue
 		}
 		listings = append(listings, map[string]interface{}{
 			"id":             id,
+			"nft_id":         nftID,
 			"script_utxo":    scriptUTxO,
 			"price_lovelace": priceLovelace,
 			"nft_policy_id":  nftPolicyID,
 			"nft_asset_name": nftAssetName,
 			"status":         status,
+			"created_at":     createdAt.UTC().Format(time.RFC3339),
 			"nft_name":       nftName,
 			"image_ipfs":     imageIPFS,
 		})
 	}
-
 	if listings == nil {
 		listings = []map[string]interface{}{}
 	}
-
 	c.JSON(http.StatusOK, gin.H{"listings": listings, "count": len(listings)})
 }
 

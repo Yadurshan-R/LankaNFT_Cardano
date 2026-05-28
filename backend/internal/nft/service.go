@@ -3,6 +3,7 @@ package nft
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,11 +55,17 @@ type MintResult struct {
 // PrepareMint uploads to IPFS and stores NFT record
 // Returns NFT ID and data needed for the blockchain transaction
 func (s *Service) PrepareMint(ctx context.Context, req MintRequest) (*MintResult, error) {
+	log.Printf("[MINT] Starting prepare for NFT: %s, image size: %d bytes", req.Name, len(req.ImageData))
+
 	// Step 1 — Upload image to Pinata
+	log.Printf("[MINT] Uploading image to Pinata...")
 	imagePin, err := s.pinata.UploadFile(req.ImageData, req.ImageName)
 	if err != nil {
+		log.Printf("[MINT] Image upload failed: %v", err)
 		return nil, fmt.Errorf("failed to upload image: %w", err)
 	}
+	log.Printf("[MINT] Image uploaded: %s", imagePin.IpfsHash)
+
 	imageIPFS := "ipfs://" + imagePin.IpfsHash
 
 	// Step 2 — Build CIP-68 metadata JSON
@@ -172,6 +179,7 @@ func (s *Service) GetUserNFTs(ctx context.Context, ownerID string) ([]map[string
                royalties, privacy, created_at
         FROM nfts
         WHERE owner_id = $1
+        AND status NOT IN ('failed', 'transferred')
         ORDER BY created_at DESC
     `, ownerID)
 	if err != nil {
@@ -267,6 +275,7 @@ func (s *Service) GetUserStats(ctx context.Context, ownerID string) (map[string]
             COUNT(*) FILTER (WHERE status = 'pending') as pending
         FROM nfts
         WHERE owner_id = $1
+        AND status NOT IN ('failed', 'transferred')
     `, ownerID).Scan(&total, &minted, &pending)
 	if err != nil {
 		return nil, err
