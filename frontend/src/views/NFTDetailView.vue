@@ -1,8 +1,32 @@
 <template>
   <div class="nft-detail">
-    <router-link to="/" class="back-link">
-      <ArrowLeft :size="14" /> Back to Dashboard
-    </router-link>
+    <div class="nft-nav">
+      <router-link to="/" class="back-link" title="Back to Dashboard">
+        <ArrowLeft :size="16" />
+      </router-link>
+
+      <div class="nft-nav-arrows">
+        <button
+          class="nav-arrow"
+          :disabled="!prevNFT"
+          @click="goToPrev"
+          title="Previous NFT (←)"
+        >
+          <ChevronLeft :size="18" />
+        </button>
+        <span class="nav-position">
+          {{ currentIndex + 1 }} / {{ dashboard.nfts.length }}
+        </span>
+        <button
+          class="nav-arrow"
+          :disabled="!nextNFT"
+          @click="goToNext"
+          title="Next NFT (→)"
+        >
+          <ChevronRight :size="18" />
+        </button>
+      </div>
+    </div>
 
     <div v-if="loading" class="detail-grid">
       <div class="skeleton skeleton--image" />
@@ -21,7 +45,6 @@
     </div>
 
     <div v-else class="detail-grid">
-      <!-- ── Left column ── -->
       <div class="detail-left">
         <div class="img-wrap">
           <img v-if="imageUrl" :src="imageUrl" :alt="nft.name" class="nft-img" />
@@ -45,7 +68,6 @@
           View on Cardanoscan
         </a>
 
-        <!-- ── List for Sale ── -->
         <div v-if="nft.status === 'minted'" class="action-section">
           <div v-if="listingConfirmed" class="confirmed-card confirmed-card--green">
             <div class="confirmed-header"><CheckCircle :size="16" /> Listed Successfully</div>
@@ -79,7 +101,6 @@
           </div>
         </div>
 
-        <!-- ── Cancel Listing ── -->
         <div v-if="nft.status === 'listed'" class="action-section">
           <div v-if="cancelConfirmed" class="confirmed-card confirmed-card--green">
             <div class="confirmed-header"><CheckCircle :size="16" /> Listing Cancelled</div>
@@ -121,7 +142,6 @@
           </div>
         </div>
 
-        <!-- ── Transfer NFT ── -->
         <div v-if="nft.status === 'minted'" class="action-section">
           <div v-if="transferConfirmed" class="confirmed-card confirmed-card--purple">
             <div class="confirmed-header"><Send :size="14" /> NFT Sent Successfully</div>
@@ -163,7 +183,6 @@
         </div>
       </div>
 
-      <!-- ── Right column ── -->
       <div class="detail-right">
         <h1 class="detail-name">{{ nft.name }}</h1>
         <p v-if="nft.description" class="detail-desc">{{ nft.description }}</p>
@@ -243,10 +262,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
-  AlertCircle, ArrowLeft, Check, CheckCircle, Copy,
+  AlertCircle, ArrowLeft, Check, CheckCircle, ChevronLeft, ChevronRight, Copy,
   ExternalLink, Image as ImageIcon,
   Loader2, Lock, Send, Store, Tag, X,
 } from 'lucide-vue-next'
@@ -256,10 +275,40 @@ import { transferNFT } from '@/services/nft'
 import ListConfirmModal from '@/components/marketplace/ListConfirmModal.vue'
 
 const route     = useRoute()
+const router    = useRouter()
 const dashboard = useDashboardStore()
 
 const loading = ref(true)
 const copied  = ref<string | null>(null)
+
+// ── Navigation logic ──────────────────────────────────────────────────────────
+const currentIndex = computed(() =>
+  dashboard.nfts.findIndex((n: any) => n.id === route.params.id)
+)
+
+const prevNFT = computed(() =>
+  currentIndex.value > 0 ? dashboard.nfts[currentIndex.value - 1] : null
+)
+
+const nextNFT = computed(() =>
+  currentIndex.value < dashboard.nfts.length - 1
+    ? dashboard.nfts[currentIndex.value + 1]
+    : null
+)
+
+function goToPrev() {
+  if (prevNFT.value) router.push(`/nft/${prevNFT.value.id}`)
+}
+
+function goToNext() {
+  if (nextNFT.value) router.push(`/nft/${nextNFT.value.id}`)
+}
+
+// Keyboard arrow key navigation
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft')  goToPrev()
+  if (e.key === 'ArrowRight') goToNext()
+}
 
 // ── Listing flow ──────────────────────────────────────────────────────────────
 const showListForm    = ref(false)
@@ -386,18 +435,68 @@ async function handleTransfer() {
 onMounted(async () => {
   if (dashboard.nfts.length === 0) await dashboard.loadDashboard()
   loading.value = false
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
 
 <style scoped>
 .nft-detail { padding: 28px 32px; max-width: 1100px; }
 
-.back-link {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 13px; color: #888; text-decoration: none;
-  margin-bottom: 24px; transition: color 0.15s;
+/* ── Navigation ── */
+.nft-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
 }
-.back-link:hover { color: #534AB7; }
+
+.nft-nav-arrows {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-arrow {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border: 1px solid #e8e8e8; border-radius: 8px;
+  background: #fff; color: #444;
+  cursor: pointer; transition: all 0.15s;
+}
+.nav-arrow:hover:not(:disabled) {
+  border-color: #534AB7;
+  color: #534AB7;
+  background: #EEEDFE;
+}
+.nav-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.nav-position {
+  font-size: 12px; color: #aaa;
+  padding: 0 8px; white-space: nowrap;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  border-radius: 8px;
+  color: #888;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.back-link:hover {
+  background: #EEEDFE;
+  color: #534AB7;
+}
 
 .detail-grid {
   display: grid;

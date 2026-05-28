@@ -1,8 +1,8 @@
 <template>
   <div class="create-mint">
 
-    <router-link to="/" class="back-link">
-      <ArrowLeft :size="14" /> Back to Dashboard
+    <router-link to="/" class="back-link" title="Back to Dashboard">
+      <ArrowLeft :size="16" />
     </router-link>
 
     <div class="page-header">
@@ -231,11 +231,21 @@ function resetForm() {
 
 /* Back link */
 .back-link {
-  display: inline-flex; align-items: center; gap: 5px;
-  font-size: 13px; color: #888; text-decoration: none;
-  margin-bottom: 20px; transition: color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  width: 32px;
+  height: 32px;
+  justify-content: center;
+  border-radius: 8px;
+  color: #888;
+  text-decoration: none;
+  margin-bottom: 20px;
+  transition: all 0.15s;
 }
-.back-link:hover { color: #534AB7; }
+.back-link:hover {
+  background: #EEEDFE;
+  color: #534AB7;
+}
 
 /* Page header */
 .page-header {

@@ -1,9 +1,3 @@
-<!-- ─────────────────────────────────────────────────────────────────────────
-  App.vue — LankaNFT root layout
-  
-  Auth page:  full screen, no sidebar
-  All others: collapsible sidebar (AppSidebar) + main content area
-──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <div id="app">
     <template v-if="isAuthPage">
@@ -42,5 +36,16 @@ body {
 a { text-decoration: none; color: inherit; }
 
 .app-layout   { display: flex; min-height: 100vh; }
-.main-content { flex: 1; margin-left: 60px; min-height: 100vh; background: #f8f8f8; }
+
+.main-content {
+  flex: 1;
+  margin-left: 64px;
+  min-height: 100vh;
+  background: #f8f8f8;
+  transition: margin-left 0.2s ease;
+}
+
+body.sidebar-expanded .main-content {
+  margin-left: 200px;
+}
 </style>

@@ -2,8 +2,8 @@
   <aside
     class="sidebar"
     :class="{ 'sidebar--expanded': isExpanded }"
-    @mouseenter="isExpanded = true"
-    @mouseleave="isExpanded = false; isWalletOpen = false"
+    @mouseenter="onMouseEnter"
+    @mouseleave="onMouseLeave"
   >
     <router-link to="/" class="sidebar-logo">
       <img src="@/assets/lanka-nft-logo.png" alt="LankaNFT" class="logo-img" />
@@ -13,9 +13,9 @@
     <div class="sidebar-divider" />
 
     <nav class="sidebar-nav">
-      <router-link to="/"        exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="20" /><span class="sidebar-label">Dashboard</span></router-link>
-      <router-link to="/mint"    active-class="sidebar-item--active"       class="sidebar-item"><Sparkles        :size="20" /><span class="sidebar-label">Create Mint</span></router-link>
-      <router-link to="/browse"  active-class="sidebar-item--active"       class="sidebar-item"><LayoutGrid      :size="20" /><span class="sidebar-label">Browse Mints</span></router-link>
+      <router-link to="/"     exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="20" /><span class="sidebar-label">Dashboard</span></router-link>
+      <router-link to="/mint"   active-class="sidebar-item--active"       class="sidebar-item"><Sparkles         :size="20" /><span class="sidebar-label">Create Mint</span></router-link>
+      <router-link to="/browse" active-class="sidebar-item--active"       class="sidebar-item"><LayoutGrid       :size="20" /><span class="sidebar-label">Browse Mints</span></router-link>
     </nav>
 
     <div class="sidebar-divider" />
@@ -68,6 +68,17 @@ const dashboard = useDashboardStore()
 const isExpanded   = ref(false)
 const isWalletOpen = ref(false)
 
+function onMouseEnter() {
+  isExpanded.value = true
+  document.body.classList.add('sidebar-expanded')
+}
+
+function onMouseLeave() {
+  isExpanded.value = false
+  isWalletOpen.value = false
+  document.body.classList.remove('sidebar-expanded')
+}
+
 async function handleLogout() {
   auth.logout()
   router.push('/auth')
@@ -112,7 +123,6 @@ async function handleLogout() {
   object-fit: contain;
   flex-shrink: 0;
   border-radius: 8px;
-  /* Always visible */
   display: block;
 }
 
@@ -155,7 +165,6 @@ async function handleLogout() {
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
-  /* Icon always centered when collapsed */
   justify-content: flex-start;
 }
 
