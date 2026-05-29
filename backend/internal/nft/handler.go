@@ -456,3 +456,107 @@ func (h *Handler) GetWalletBalance(c *gin.Context) {
 		"lovelace":       lovelace,
 	})
 }
+
+// RegisterPublicRoutes registers NFT routes that require no authentication.
+// Called from main.go on the base router (not the protected group).
+// Currently only the certificate endpoint is public — all others require JWT.
+func (h *Handler) RegisterPublicRoutes(router *gin.Engine) {
+	router.GET("/api/certificate/:id", h.GetCertificate)
+}
+
+// GetCertificate godoc
+// GET /api/certificate/:id
+//
+// Returns public certificate data for a minted NFT.
+// No authentication required — certificate URLs are designed to be
+// shared publicly (with buyers, galleries, on social media).
+//
+// Security decisions:
+//   - Only 'minted' and 'listed' NFTs are returned. Pending/failed/transferred
+//     NFTs return 404 — no certificate until the NFT exists on-chain.
+//   - Owner email is never exposed — only the wallet address, which is
+//     already public on the Cardano blockchain.
+//   - NFT existence is not confirmed on 404 — prevents enumeration attacks.
+func (h *Handler) GetCertificate(c *gin.Context) {
+	nftID := c.Param("id")
+	if nftID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "NFT ID is required"})
+		return
+	}
+
+	// Fetch NFT details + owner wallet address in one query.
+	// LEFT JOIN on custodial_wallets — some NFTs may have been transferred
+	// to external wallets, in which case owner_address will be empty string.
+	var (
+		id, nftName, description, imageIPFS string
+		policyID, assetName, txHash         string
+		privacy, status                     string
+		royalties                           float64
+		createdAt, ownerAddress             string
+	)
+
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT
+			n.id,
+			n.nft_name,
+			n.description,
+			n.image_ipfs,
+			n.policy_id,
+			n.asset_name,
+			COALESCE(n.tx_hash, ''),
+			n.privacy,
+			n.status,
+			n.royalties,
+			TO_CHAR(n.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+			COALESCE(cw.wallet_address, '') AS owner_address
+		FROM nfts n
+		LEFT JOIN custodial_wallets cw ON cw.user_id = n.owner_id
+		WHERE n.id = $1
+		  AND n.status IN ('minted', 'listed')
+	`, nftID).Scan(
+		&id, &nftName, &description, &imageIPFS,
+		&policyID, &assetName, &txHash,
+		&privacy, &status, &royalties,
+		&createdAt, &ownerAddress,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": "Certificate not found. The NFT may not exist or may not be minted yet.",
+		})
+		return
+	}
+
+	// Build Cardanoscan links — empty string if no tx hash yet
+	cardanoscanTx := ""
+	cardanoscanAsset := ""
+	if txHash != "" {
+		cardanoscanTx = fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", txHash)
+		cardanoscanAsset = fmt.Sprintf("https://preprod.cardanoscan.io/token/%s%s", policyID, assetName)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		// Core NFT identity
+		"id":          id,
+		"nft_name":    nftName,
+		"description": description,
+		"image_ipfs":  imageIPFS,
+
+		// On-chain proof of authenticity
+		"policy_id":     policyID,
+		"asset_name":    assetName,
+		"tx_hash":       txHash,
+		"owner_address": ownerAddress,
+
+		// Certificate metadata
+		"status":    status,
+		"royalties": royalties,
+		"privacy":   privacy,
+		"minted_at": createdAt,
+		"network":   "Cardano Preprod",
+		"platform":  "LankaNFT",
+
+		// Direct links for verification
+		"cardanoscan_tx":    cardanoscanTx,
+		"cardanoscan_asset": cardanoscanAsset,
+	})
+}

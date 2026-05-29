@@ -60,6 +60,13 @@ const router = createRouter({
       component: () => import('@/views/ActivityView.vue'),
       meta: { requiresAuth: true, title: 'Activity' },
     },
+    {
+      path: '/certificate/:id',
+      name: 'certificate',
+      component: () => import('@/views/CertificateView.vue'),
+      meta: { title: 'NFT Certificate' },
+      // No requiresAuth or requiresGuest — fully public page
+    },
     // ── Catch-all 404 ──────────────────────────────────────────────────────
     // Must be last — matches any URL not matched above.
     // No auth requirement — anyone can land on a broken URL.

@@ -131,6 +131,7 @@ func main() {
 
 		nftHandler := nft.NewHandler(db.DB)
 		nftHandler.RegisterRoutes(protected)
+		nftHandler.RegisterPublicRoutes(router) // Certificate endpoint — no auth required
 
 		batchHandler := batch.NewHandler(db.DB)
 		batchHandler.RegisterRoutes(protected)

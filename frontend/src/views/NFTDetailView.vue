@@ -68,6 +68,15 @@
           View on Cardanoscan
         </a>
 
+        <router-link
+          v-if="nft && (nft.status === 'minted' || nft.status === 'listed')"
+          :to="`/certificate/${nft.id}`"
+          target="_blank"
+          class="btn-certificate"
+        >
+          <Award :size="13" /> View Certificate
+        </router-link>
+
         <div v-if="nft.status === 'minted'" class="action-section">
           <div v-if="listingConfirmed" class="confirmed-card confirmed-card--green">
             <div class="confirmed-header"><CheckCircle :size="16" /> Listed Successfully</div>
@@ -265,7 +274,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  AlertCircle, ArrowLeft, Check, CheckCircle, ChevronLeft, ChevronRight, Copy,
+  AlertCircle, ArrowLeft, Award, Check, CheckCircle, ChevronLeft, ChevronRight, Copy,
   ExternalLink, Image as ImageIcon,
   Loader2, Lock, Send, Store, Tag, X,
 } from 'lucide-vue-next'
@@ -540,6 +549,26 @@ onUnmounted(() => {
   font-size: 13px; font-weight: 600; transition: background 0.15s;
 }
 .btn-scan:hover { background: #3d35a0; }
+
+.btn-certificate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px;
+  background: #fff;
+  color: #534AB7;
+  border: 1.5px solid #534AB7;
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+  cursor: pointer;
+}
+.btn-certificate:hover {
+  background: #EEEDFE;
+}
 
 .action-section { display: flex; flex-direction: column; gap: 8px; }
 
