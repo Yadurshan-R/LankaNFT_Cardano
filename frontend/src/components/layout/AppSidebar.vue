@@ -120,9 +120,9 @@ async function handleLogout() {
 .logo-img {
   width: 36px;
   height: 36px;
-  object-fit: contain;
+  object-fit: cover;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 50%;
   display: block;
 }
 

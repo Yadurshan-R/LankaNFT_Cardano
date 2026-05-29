@@ -1,6 +1,10 @@
 <template>
   <div class="browse">
 
+    <router-link to="/" class="back-link" title="Back to Dashboard">
+      <ArrowLeft :size="16" />
+    </router-link>
+
     <div class="page-header">
       <div>
         <h1 class="page-title">Browse Mints</h1>
@@ -143,7 +147,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
-  AlertCircle, CheckCircle,
+  AlertCircle, ArrowLeft, CheckCircle,
   Image as ImageIcon, Loader2,
   Search, ShoppingCart, SlidersHorizontal,
   Store, X,
@@ -281,6 +285,23 @@ onMounted(async () => {
 .page-header { margin-bottom: 20px; }
 .page-title  { font-size: 22px; font-weight: 600; margin-bottom: 3px; }
 .page-sub    { font-size: 13px; color: #888; }
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: #888;
+  text-decoration: none;
+  margin-bottom: 20px;
+  transition: all 0.15s;
+}
+.back-link:hover {
+  background: #EEEDFE;
+  color: #534AB7;
+}
 
 /* Filter bar */
 .filter-bar {

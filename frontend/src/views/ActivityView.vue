@@ -1,7 +1,10 @@
 <template>
   <div class="activity">
 
-    <!-- ── Header ── -->
+    <router-link to="/" class="back-link" title="Back to Dashboard">
+      <ArrowLeft :size="16" />
+    </router-link>
+
     <div class="page-header">
       <div>
         <h1 class="page-title">Activity</h1>
@@ -9,7 +12,6 @@
       </div>
     </div>
 
-    <!-- ── Filter tabs ── -->
     <div class="filter-bar">
       <button
         v-for="f in filters"
@@ -25,7 +27,6 @@
       </button>
     </div>
 
-    <!-- ── Loading skeleton ── -->
     <template v-if="dashboard.isLoading">
       <div v-for="n in 5" :key="n" class="skeleton-item">
         <div class="sk-thumb" />
@@ -37,7 +38,6 @@
       </div>
     </template>
 
-    <!-- ── Empty state ── -->
     <div v-else-if="visibleGroups.length === 0" class="empty-state">
       <Activity :size="40" color="#ddd" />
       <p class="empty-title">
@@ -56,26 +56,21 @@
       </router-link>
     </div>
 
-    <!-- ── Grouped activity list ── -->
     <template v-else>
       <div v-for="group in visibleGroups" :key="group.date" class="date-group">
 
-        <!-- Date separator -->
         <div class="date-label">{{ group.date }}</div>
 
-        <!-- Events for this date -->
         <div class="group-items">
           <div
             v-for="item in group.items"
             :key="item.id"
             class="activity-item"
           >
-            <!-- Colored icon thumb — single visual indicator, no redundant dot -->
             <div :class="['activity-thumb', `activity-thumb--${item.type}`]">
               <component :is="activityIcon(item.type)" :size="15" />
             </div>
 
-            <!-- Info -->
             <div class="activity-info">
               <div class="activity-name">{{ item.name }}</div>
               <div class="activity-sub">
@@ -86,7 +81,6 @@
               </div>
             </div>
 
-            <!-- Right side: time + tx link -->
             <div class="activity-right">
               <span class="activity-time">{{ item.time }}</span>
               <a
@@ -104,7 +98,6 @@
         </div>
       </div>
 
-      <!-- ── Load more ── -->
       <div class="list-footer">
         <span class="results-count">
           Showing {{ shownCount }} of {{ filteredItems.length }} events
@@ -138,7 +131,7 @@
 
 import { computed, onMounted, ref } from 'vue'
 import {
-  Activity, ExternalLink, Layers,
+  Activity, ArrowLeft, ExternalLink, Layers,
   Send, ShoppingCart, Sparkles, Tag, X,
 } from 'lucide-vue-next'
 import { useDashboardStore } from '@/stores/dashboard'
@@ -190,13 +183,13 @@ const allItems = computed(() => {
     if (!type) return
 
     items.push({
-      id:     `listing-${l.id}`,
+      id:      `listing-${l.id}`,
       type,
-      name:   l.nft_name,
-      price:  l.price_lovelace ? (l.price_lovelace / 1_000_000).toFixed(0) : null,
+      name:    l.nft_name,
+      price:   l.price_lovelace ? (l.price_lovelace / 1_000_000).toFixed(0) : null,
       rawDate: l.created_at,
-      time:   formatTime(l.created_at),
-      txHash: null,
+      time:    formatTime(l.created_at),
+      txHash:  null,
     })
   })
 
@@ -302,7 +295,7 @@ function dateGroupLabel(dateStr: string): string {
     date.getMonth() === yesterday.getMonth() &&
     date.getFullYear() === yesterday.getFullYear()
 
-  if (isToday)     return 'Today'
+  if (isToday)      return 'Today'
   if (isYesterday) return 'Yesterday'
 
   // Show year only if different from current year
@@ -343,6 +336,23 @@ onMounted(async () => {
 .page-header  { margin-bottom: 20px; }
 .page-title   { font-size: 22px; font-weight: 600; margin-bottom: 3px; }
 .page-sub     { font-size: 13px; color: #888; }
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: #888;
+  text-decoration: none;
+  margin-bottom: 20px;
+  transition: all 0.15s;
+}
+.back-link:hover {
+  background: #EEEDFE;
+  color: #534AB7;
+}
 
 /* ── Filter bar ── */
 .filter-bar {

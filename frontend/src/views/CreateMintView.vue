@@ -104,10 +104,12 @@
       </div>
 
       <div class="form-content">
-        <UploadAsset @file-selected="onFileSelected" />
-        <MetadataForm @update="onMetadataUpdate" />
-        <PrivacySelector v-model="privacy" />
-        <MintStrategy v-model="mintStrategy" />
+        <div class="content-card">
+          <UploadAsset @file-selected="onFileSelected" />
+          <MetadataForm @update="onMetadataUpdate" />
+          <PrivacySelector v-model="privacy" />
+          <MintStrategy v-model="mintStrategy" />
+        </div>
 
         <div v-if="nftStore.error" class="error-msg">
           <AlertCircle :size="14" />
@@ -337,6 +339,16 @@ function resetForm() {
 
 /* Form content */
 .form-content { display: flex; flex-direction: column; gap: 12px; }
+
+.content-card {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
 
 /* Error */
 .error-msg {
