@@ -174,8 +174,9 @@ func (h *Handler) CreateListing(c *gin.Context) {
 
 // BuyListing godoc
 // POST /api/listing/buy
-// Purchases a listed NFT. Transfers ownership on-chain and in the DB.
-// Sends email notification to the seller.
+//
+// Purchases a listed NFT. Transfers NFT and ADA on-chain.
+//
 // Body: { listing_id }
 func (h *Handler) BuyListing(c *gin.Context) {
 	userID := c.GetString("user_id")
@@ -229,14 +230,9 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		return
 	}
 
-	// Parse "txHash#index" into separate components for the sidecar
 	utxoParts := splitUTxO(scriptUTxO)
-
-	// Convert DB token name to on-chain hex unit for the UTxO lookup
 	nftUnit := buildNFTUnit(nftPolicyID, nftAssetName)
 
-	// Call the blockchain sidecar to build and submit the buy transaction
-	// The sidecar handles: script spending, collateral, royalty payment
 	result, err := h.service.blockchainClient.BuyNFT(blockchain.BuyNFTRequest{
 		Mnemonic:         mnemonic,
 		ListingUTxOHash:  utxoParts[0],
@@ -251,7 +247,7 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		return
 	}
 
-	// Mark listing as sold and trigger email notification to seller (goroutine)
+	// Mark listing as sold and notify seller
 	h.service.MarkListingSold(c.Request.Context(), body.ListingID, result.TxHash, userID)
 
 	// Transfer NFT ownership in the DB to the buyer
@@ -260,7 +256,6 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		WHERE policy_id = $2 AND user_token_name = $3
 	`, userID, nftPolicyID, nftAssetName)
 
-	// Get seller email and NFT name for the buyer's confirmation response
 	var sellerEmail, nftName string
 	h.service.db.QueryRow(c.Request.Context(), `
 		SELECT u.email, n.nft_name
@@ -270,13 +265,15 @@ func (h *Handler) BuyListing(c *gin.Context) {
 		WHERE l.id = $1
 	`, body.ListingID).Scan(&sellerEmail, &nftName)
 
+	log.Printf("[LISTING] NFT sold — listing: %s, nft: %s, price: %d lovelace, tx: %s",
+		body.ListingID, nftName, priceLovelace, result.TxHash)
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":      "NFT purchased successfully",
-		"tx_hash":      result.TxHash,
-		"nft_name":     nftName,
-		"seller_email": sellerEmail,
-		"price_ada":    float64(priceLovelace) / 1_000_000,
-		"cardanoscan":  fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", result.TxHash),
+		"message":     "NFT purchased successfully",
+		"tx_hash":     result.TxHash,
+		"nft_name":    nftName,
+		"price_ada":   float64(priceLovelace) / 1_000_000,
+		"cardanoscan": fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", result.TxHash),
 	})
 }
 
@@ -341,13 +338,24 @@ func (h *Handler) CancelListing(c *gin.Context) {
 
 // GetAllListings godoc
 // GET /api/listing/all
-// Returns all active listings with NFT metadata for the Browse Mints page.
+//
+// Returns all active listings for the Browse Mints page.
+//
+// Includes is_own: true for listings created by the authenticated user.
+// The frontend uses this to show "Your Listing" instead of a Buy button,
+// preventing confusing UX where a seller sees their own NFT for sale
+// and tries to buy it (which the backend would reject anyway).
 func (h *Handler) GetAllListings(c *gin.Context) {
-	listings, err := h.service.GetActiveListings(c.Request.Context())
+	// Get the authenticated user's ID to flag their own listings.
+	// This endpoint requires auth so user_id is always available.
+	userID := c.GetString("user_id")
+
+	listings, err := h.service.GetActiveListings(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch listings"})
 		return
 	}
+
 	c.JSON(http.StatusOK, gin.H{"listings": listings, "count": len(listings)})
 }
 

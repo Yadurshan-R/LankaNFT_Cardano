@@ -46,6 +46,7 @@
 
     <div v-else class="detail-grid">
       <div class="detail-left">
+
         <div class="img-wrap">
           <img v-if="imageUrl" :src="imageUrl" :alt="nft.name" class="nft-img" />
           <div v-else class="nft-img-placeholder">
@@ -57,25 +58,27 @@
           </span>
         </div>
 
-        <a
-          v-if="nft.tx_hash"
-          :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="btn-scan"
-        >
-          <ExternalLink :size="13" />
-          View on Cardanoscan
-        </a>
-
-        <router-link
-          v-if="nft && (nft.status === 'minted' || nft.status === 'listed')"
-          :to="`/certificate/${nft.id}`"
-          target="_blank"
-          class="btn-certificate"
-        >
-          <Award :size="13" /> View Certificate
-        </router-link>
+        <div class="secondary-actions">
+          <a
+            v-if="nft.tx_hash"
+            :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn-secondary"
+            title="View on Cardanoscan"
+          >
+            <ExternalLink :size="13" /> Cardanoscan
+          </a>
+          <router-link
+            v-if="nft.status === 'minted' || nft.status === 'listed'"
+            :to="`/certificate/${nft.id}`"
+            target="_blank"
+            class="btn-secondary"
+            title="View Certificate"
+          >
+            <Award :size="13" /> Certificate
+          </router-link>
+        </div>
 
         <div v-if="nft.status === 'minted'" class="action-section">
           <div v-if="listingConfirmed" class="confirmed-card confirmed-card--green">
@@ -90,24 +93,24 @@
             </div>
             <p class="confirmed-note">Your NFT is now visible in Browse Mints.</p>
           </div>
-          <div v-else>
-            <button v-if="!showListForm" class="btn-action btn-action--dark" @click="showListForm = true">
-              <Tag :size="14" /> List for Sale
+          <template v-else>
+            <button v-if="!showListForm" class="btn-primary-action" @click="showListForm = true">
+              <Tag :size="15" /> List for Sale
             </button>
             <div v-else class="form-card">
               <label class="form-label">Price in ADA</label>
               <input v-model.number="listPrice" type="number" placeholder="e.g. 10"
                 class="form-input" min="2" />
-              <p class="form-hint">Minimum 2 ADA · You receive sale price minus royalties</p>
+              <p class="form-hint">Minimum 2 ADA · You receive sale price minus royalties and platform fee</p>
               <div class="form-actions">
-                <button class="btn-primary" :disabled="listing" @click="showListConfirm = true">
+                <button class="btn-confirm-action" :disabled="listing" @click="showListConfirm = true">
                   Review & Confirm
                 </button>
                 <button class="btn-ghost" @click="showListForm = false">Cancel</button>
               </div>
               <p v-if="listError" class="form-error">{{ listError }}</p>
             </div>
-          </div>
+          </template>
         </div>
 
         <div v-if="nft.status === 'listed'" class="action-section">
@@ -120,14 +123,13 @@
             </div>
             <p class="confirmed-note">Your NFT has been returned to your wallet.</p>
           </div>
-          <div v-else>
+          <template v-else>
             <div class="listed-notice">
-              <Store :size="14" />
-              This NFT is currently listed in the marketplace.
+              <Store :size="14" /> This NFT is currently listed in the marketplace.
             </div>
             <button
               v-if="!showCancelConfirm"
-              class="btn-action btn-action--outline-red"
+              class="btn-outline-red"
               @click="showCancelConfirm = true"
             >
               <X :size="14" /> Cancel Listing
@@ -148,10 +150,10 @@
               </div>
               <p v-if="cancelError" class="form-error">{{ cancelError }}</p>
             </div>
-          </div>
+          </template>
         </div>
 
-        <div v-if="nft.status === 'minted'" class="action-section">
+        <div v-if="nft.status === 'minted'" class="transfer-section">
           <div v-if="transferConfirmed" class="confirmed-card confirmed-card--purple">
             <div class="confirmed-header"><Send :size="14" /> NFT Sent Successfully</div>
             <div class="confirmed-row">
@@ -165,31 +167,33 @@
             </div>
             <p class="confirmed-note">This NFT has been removed from your dashboard.</p>
           </div>
-          <div v-else>
-            <button v-if="!showTransferForm" class="btn-action btn-action--outline" @click="showTransferForm = true">
-              <Send :size="14" /> Transfer NFT
+          <template v-else>
+            <button class="btn-transfer-toggle" @click="showTransferForm = !showTransferForm">
+              <Send :size="13" />
+              {{ showTransferForm ? 'Cancel Transfer' : 'Transfer to Another Wallet' }}
+              <ChevronDown :size="13" :class="{ 'rotate-icon': showTransferForm }" />
             </button>
-            <div v-else class="form-card">
+            <div v-if="showTransferForm" class="form-card">
               <label class="form-label">Recipient Address</label>
               <input v-model="transferAddress" class="form-input" placeholder="addr_test1..." />
-              <p class="form-hint">Enter any valid Cardano preprod address</p>
+              <p class="form-hint">Enter any valid Cardano Preprod address</p>
               <div class="fee-box">
-                <div class="fee-row"><span>Min-ADA sent with NFT</span><span>2 ADA <span class="fee-note">(goes to recipient)</span></span></div>
+                <div class="fee-row"><span>Min-ADA with NFT</span><span>2 ADA <span class="fee-note">(goes to recipient)</span></span></div>
                 <div class="fee-row"><span>Network fee</span><span>~0.2 ADA</span></div>
                 <div class="fee-divider" />
                 <div class="fee-row fee-row--total"><span>You will spend</span><strong>~2.2 ADA</strong></div>
               </div>
               <div class="form-actions">
-                <button class="btn-primary" :disabled="transferring || !transferAddress" @click="handleTransfer">
+                <button class="btn-confirm-action" :disabled="transferring || !transferAddress" @click="handleTransfer">
                   <Loader2 v-if="transferring" :size="13" class="spin" />
                   {{ transferring ? 'Sending...' : 'Send NFT' }}
                 </button>
-                <button class="btn-ghost" @click="showTransferForm = false; transferError = ''">Cancel</button>
               </div>
               <p v-if="transferError" class="form-error">{{ transferError }}</p>
             </div>
-          </div>
+          </template>
         </div>
+
       </div>
 
       <div class="detail-right">
@@ -274,7 +278,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  AlertCircle, ArrowLeft, Award, Check, CheckCircle, ChevronLeft, ChevronRight, Copy,
+  AlertCircle, ArrowLeft, Award, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Copy,
   ExternalLink, Image as ImageIcon,
   Loader2, Lock, Send, Store, Tag, X,
 } from 'lucide-vue-next'
@@ -542,48 +546,70 @@ onUnmounted(() => {
   padding: 4px 10px; border-radius: 20px;
 }
 
-.btn-scan {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 11px; background: #534AB7; color: #fff;
-  border-radius: 10px; text-decoration: none;
-  font-size: 13px; font-weight: 600; transition: background 0.15s;
-}
-.btn-scan:hover { background: #3d35a0; }
-
-.btn-certificate {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 11px;
-  background: #fff;
-  color: #534AB7;
-  border: 1.5px solid #534AB7;
-  border-radius: 10px;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 600;
-  transition: all 0.15s;
-  cursor: pointer;
-}
-.btn-certificate:hover {
-  background: #EEEDFE;
-}
-
 .action-section { display: flex; flex-direction: column; gap: 8px; }
 
-.btn-action {
-  display: flex; align-items: center; justify-content: center;
-  gap: 6px; width: 100%; padding: 11px;
-  border-radius: 10px; font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: all 0.15s; border: none;
+.secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
-.btn-action--dark         { background: #1a1a1a; color: #fff; }
-.btn-action--dark:hover   { background: #333; }
-.btn-action--outline      { background: transparent; color: #534AB7; border: 1px solid #534AB7; }
-.btn-action--outline:hover { background: #EEEDFE; }
-.btn-action--outline-red  { background: transparent; color: #d32f2f; border: 1px solid #d32f2f; }
-.btn-action--outline-red:hover { background: #FCEBEB; }
+
+.btn-secondary {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 12px;
+  background: #fff; color: #534AB7;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px; text-decoration: none;
+  font-size: 12px; font-weight: 600;
+  transition: all 0.15s; cursor: pointer;
+}
+.btn-secondary:hover { border-color: #534AB7; background: #EEEDFE; }
+
+.btn-primary-action {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; padding: 13px;
+  background: #534AB7; color: #fff;
+  border: none; border-radius: 10px;
+  font-size: 14px; font-weight: 700;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-primary-action:hover { background: #3d35a0; }
+
+.btn-confirm-action {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  gap: 6px; padding: 9px 16px;
+  background: #534AB7; color: #fff;
+  border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s;
+}
+.btn-confirm-action:hover:not(:disabled) { background: #3d35a0; }
+.btn-confirm-action:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-outline-red {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; padding: 10px;
+  background: transparent; color: #d32f2f;
+  border: 1px solid #d32f2f; border-radius: 10px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s;
+}
+.btn-outline-red:hover { background: #FCEBEB; }
+
+.btn-transfer-toggle {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 10px 14px;
+  background: #fafafa; color: #666;
+  border: 1px solid #e8e8e8; border-radius: 10px;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: all 0.15s;
+  justify-content: center;
+}
+.btn-transfer-toggle:hover { border-color: #534AB7; color: #534AB7; background: #EEEDFE; }
+
+.rotate-icon { transform: rotate(180deg); transition: transform 0.2s; }
+
+.transfer-section { display: flex; flex-direction: column; gap: 8px; }
 
 .listed-notice {
   display: flex; align-items: center; gap: 8px;
@@ -614,15 +640,6 @@ onUnmounted(() => {
 .form-error { font-size: 12px; color: #d32f2f; }
 
 .form-actions { display: flex; gap: 8px; }
-
-.btn-primary {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  gap: 6px; padding: 9px 16px; background: #534AB7; color: #fff;
-  border: none; border-radius: 8px; font-size: 13px; font-weight: 600;
-  cursor: pointer; transition: background 0.15s;
-}
-.btn-primary:hover:not(:disabled) { background: #3d35a0; }
-.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .btn-danger {
   flex: 1; display: flex; align-items: center; justify-content: center;

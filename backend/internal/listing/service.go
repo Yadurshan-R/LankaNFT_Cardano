@@ -1,12 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // internal/listing/service.go
 //
-// Marketplace Listing Service
+// # Marketplace Listing Service
 //
 // Handles the business logic for listing, buying, and cancelling NFTs.
 // Works with the blockchain sidecar to build and submit Cardano transactions.
 // ─────────────────────────────────────────────────────────────────────────────
-
 package listing
 
 import (
@@ -14,11 +13,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"NFT_Minting_Platform/pkg/blockchain"
 	"NFT_Minting_Platform/pkg/crypto"
 	"NFT_Minting_Platform/pkg/email"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Service handles listing business logic
@@ -35,7 +34,8 @@ func NewService(db *pgxpool.Pool) *Service {
 	}
 }
 
-// GetWalletForUser retrieves and decrypts the custodial wallet mnemonic
+// GetWalletForUser retrieves and decrypts the custodial wallet mnemonic.
+// Never logs the decrypted mnemonic.
 func (s *Service) GetWalletForUser(ctx context.Context, userID string) ([]string, string, error) {
 	var encryptedMnemonic, walletAddress string
 	err := s.db.QueryRow(ctx, `
@@ -56,7 +56,7 @@ func (s *Service) GetWalletForUser(ctx context.Context, userID string) ([]string
 	return words, walletAddress, nil
 }
 
-// CreateListing stores a new listing in the DB after on-chain confirmation
+// CreateListing stores a new listing in the DB after on-chain confirmation.
 func (s *Service) CreateListing(
 	ctx context.Context,
 	nftID string,
@@ -100,21 +100,34 @@ func (s *Service) CreateListing(
 	return listingID, nil
 }
 
-// GetActiveListings returns all active listings
-func (s *Service) GetActiveListings(ctx context.Context) ([]map[string]interface{}, error) {
+// GetActiveListings returns all active listings for the Browse Mints page.
+//
+// The currentUserID parameter is used to set is_own: true on listings that
+// belong to the requesting user. The frontend uses this flag to hide the
+// Buy button on the user's own listings — preventing a confusing UX where
+// a seller sees their own NFT for sale and tries to purchase it.
+//
+// Seller email is intentionally excluded from this response — it is public
+// data but unnecessary for browsing, and reducing exposure is good practice.
+func (s *Service) GetActiveListings(ctx context.Context, currentUserID string) ([]map[string]interface{}, error) {
 	rows, err := s.db.Query(ctx, `
         SELECT
-            l.id, l.nft_id, l.seller_id,
-            l.listing_tx_hash, l.script_utxo,
+            l.id,
+            l.nft_id,
+            l.seller_id,
+            l.listing_tx_hash,
+            l.script_utxo,
             l.price_lovelace,
-            l.nft_policy_id, l.nft_asset_name,
+            l.nft_policy_id,
+            l.nft_asset_name,
             l.royalty_policy_id,
             l.created_at,
-            n.nft_name, n.description, n.image_ipfs,
-            u.email as seller_email
+            n.nft_name,
+            n.description,
+            n.image_ipfs,
+            n.royalties
         FROM listings l
         JOIN nfts n ON n.id = l.nft_id
-        JOIN users u ON u.id = l.seller_id
         WHERE l.status = 'active'
         ORDER BY l.created_at DESC
     `)
@@ -127,8 +140,9 @@ func (s *Service) GetActiveListings(ctx context.Context) ([]map[string]interface
 	for rows.Next() {
 		var id, nftID, sellerID, txHash, scriptUTxO string
 		var nftPolicyID, nftAssetName, royaltyPolicyID string
-		var nftName, description, imageIPFS, sellerEmail string
+		var nftName, description, imageIPFS string
 		var priceLovelace int64
+		var royalties float64
 		var createdAt interface{}
 
 		err := rows.Scan(
@@ -139,7 +153,7 @@ func (s *Service) GetActiveListings(ctx context.Context) ([]map[string]interface
 			&royaltyPolicyID,
 			&createdAt,
 			&nftName, &description, &imageIPFS,
-			&sellerEmail,
+			&royalties,
 		)
 		if err != nil {
 			return nil, err
@@ -159,7 +173,9 @@ func (s *Service) GetActiveListings(ctx context.Context) ([]map[string]interface
 			"nft_name":          nftName,
 			"description":       description,
 			"image_ipfs":        imageIPFS,
-			"seller_email":      sellerEmail,
+			"royalties":         royalties,
+			// is_own: true means the buyer is the seller — frontend hides Buy button
+			"is_own": sellerID == currentUserID,
 		})
 	}
 
@@ -170,7 +186,7 @@ func (s *Service) GetActiveListings(ctx context.Context) ([]map[string]interface
 	return listings, nil
 }
 
-// MarkListingSold updates listing status to sold and notifies the seller
+// MarkListingSold updates listing status to sold and notifies the seller by email.
 func (s *Service) MarkListingSold(
 	ctx context.Context,
 	listingID string,
@@ -208,14 +224,13 @@ func (s *Service) MarkListingSold(
 		if err != nil {
 			return
 		}
-
 		email.SendSaleNotification(sellerEmail, nftName, buyerEmail, priceLovelace, saleTxHash)
 	}()
 
 	return nil
 }
 
-// MarkListingCancelled updates listing status to cancelled
+// MarkListingCancelled updates listing status to cancelled and restores NFT to minted.
 func (s *Service) MarkListingCancelled(ctx context.Context, listingID string) error {
 	_, err := s.db.Exec(ctx, `
         UPDATE listings
@@ -226,7 +241,7 @@ func (s *Service) MarkListingCancelled(ctx context.Context, listingID string) er
 		return err
 	}
 
-	// Get nft_id and restore NFT status
+	// Restore NFT status to minted so it can be listed again
 	var nftID string
 	s.db.QueryRow(ctx, `SELECT nft_id FROM listings WHERE id = $1`, listingID).Scan(&nftID)
 	if nftID != "" {

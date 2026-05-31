@@ -82,7 +82,7 @@ const marketplaceAddress = serializePlutusScript(
  * - The correct royalty policy is referenced
  *
  * Aiken datum structure (marketplace.ak):
- *   { seller_pkh, seller_address, price, nft_policy, nft_name, royalty_policy }
+ * { seller_pkh, seller_address, price, nft_policy, nft_name, royalty_policy }
  */
 function buildListingDatum(
   sellerAddress: string,
@@ -274,8 +274,8 @@ router.post("/list", async (req: Request, res: Response) => {
  * Retries UTxO lookup to handle Blockfrost indexing delay.
  *
  * Body: { mnemonic, listing_utxo_hash, listing_utxo_index, seller_address,
- *         price_lovelace, nft_unit, royalty_amount, royalty_address,
- *         royalty_utxo_hash, royalty_utxo_index }
+ * price_lovelace, nft_unit, royalty_amount, royalty_address,
+ * royalty_utxo_hash, royalty_utxo_index }
  */
 router.post("/buy", async (req: Request, res: Response) => {
   try {
