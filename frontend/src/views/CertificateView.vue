@@ -418,7 +418,7 @@ function downloadPDF() {
   width: 100%;
   max-width: 320px;
   aspect-ratio: 1;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 16px;
   border: 1px solid #f0f0f0;
 }

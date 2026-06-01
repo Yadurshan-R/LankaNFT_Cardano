@@ -543,7 +543,7 @@ onUnmounted(() => {
   border-radius: 16px; overflow: hidden;
   background: #f8f8f8; border: 1px solid #f0f0f0;
 }
-.nft-img             { width: 100%; height: 100%; object-fit: cover; }
+.nft-img             { width: 100%; height: 100%; object-fit: contain ; }
 .nft-img-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 
 .status-badge {
