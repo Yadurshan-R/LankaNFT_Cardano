@@ -145,8 +145,8 @@
             <ExternalLink :size="13" /> View Transaction
           </a>
           <a
-            v-if="cert.cardanoscan_asset"
-            :href="cert.cardanoscan_asset"
+            v-if="imageUrl"
+            :href="imageUrl"
             target="_blank"
             rel="noopener noreferrer"
             class="cert-link"

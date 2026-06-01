@@ -59,9 +59,13 @@
         </div>
 
         <div class="secondary-actions">
+          <a :href="ipfsUrl" target="_blank" rel="noopener noreferrer" class="btn-secondary" title="View Asset">
+            <ExternalLink :size="13" /> View Asset
+          </a>
+
           <a
-            v-if="nft.tx_hash"
-            :href="`https://preprod.cardanoscan.io/transaction/${nft.tx_hash}`"
+            v-if="nft.policy_id && nft.user_token_name"
+            :href="cardanoscanUrl"
             target="_blank"
             rel="noopener noreferrer"
             class="btn-secondary"
@@ -69,6 +73,7 @@
           >
             <ExternalLink :size="13" /> Cardanoscan
           </a>
+
           <router-link
             v-if="nft.status === 'minted' || nft.status === 'listed'"
             :to="`/certificate/${nft.id}`"
@@ -101,7 +106,7 @@
               <label class="form-label">Price in ADA</label>
               <input v-model.number="listPrice" type="number" placeholder="e.g. 10"
                 class="form-input" min="2" />
-              <p class="form-hint">Minimum 2 ADA · You receive sale price minus royalties and platform fee</p>
+              <p class="form-hint">Minimum 2 ADA · You receive sale price minus royalties</p>
               <div class="form-actions">
                 <button class="btn-confirm-action" :disabled="listing" @click="showListConfirm = true">
                   Review & Confirm
@@ -359,6 +364,18 @@ const imageUrl = computed(() => {
     : nft.value.image
 })
 
+// IPFS button — opens the actual image/asset
+const ipfsUrl = computed(() => {
+  const ipfs = nft.value?.image || nft.value?.image_ipfs
+  if (!ipfs) return '#'
+  return `https://gateway.pinata.cloud/ipfs/${ipfs.replace('ipfs://', '')}`
+})
+
+// Cardanoscan button — use user_token_name which is already hex-encoded
+const cardanoscanUrl = computed(() => {
+  return `https://preprod.cardanoscan.io/token/${nft.value?.policy_id}${nft.value?.user_token_name}`
+})
+
 const formattedDate = computed(() => {
   if (!nft.value?.created_at) return '—'
   return new Date(nft.value.created_at).toLocaleDateString('en-US', {
@@ -549,12 +566,12 @@ onUnmounted(() => {
 .action-section { display: flex; flex-direction: column; gap: 8px; }
 
 .secondary-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 8px;
 }
 
 .btn-secondary {
+  flex: 1;
   display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 9px 12px;
   background: #fff; color: #534AB7;
