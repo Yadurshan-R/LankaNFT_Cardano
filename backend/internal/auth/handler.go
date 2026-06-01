@@ -33,6 +33,23 @@ func (h *Handler) RegisterRoutes(router *gin.Engine) {
 	}
 }
 
+// GetMe godoc
+// GET /api/me
+// Returns current authenticated context user ID and message.
+// Prepares user parameters for upcoming external wallet tracking features.
+func (h *Handler) GetMe(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user_id": userID,
+		"message": "you are authenticated",
+	})
+}
+
 // RequestOTP godoc
 // POST /auth/request-otp
 // Body: { "email": "user@example.com" }

@@ -1,3 +1,23 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// internal/nft/service.go
+//
+// # NFT Service — Core minting and ownership business logic
+//
+// Responsibilities:
+//   - PrepareMint: upload image + metadata to Pinata/IPFS, create DB record
+//   - UpdateMintStatus: mark NFT as minted after blockchain confirmation
+//   - GetUserNFTs: fetch all NFTs owned by a user from DB
+//   - GetUserStats: total/minted/pending counts for dashboard
+//   - GetWalletForUser: decrypt custodial mnemonic for signing
+//
+// CIP-68 token naming:
+//
+//	Reference token (label 100): prefix 000643b0 + assetName
+//	User token      (label 222): prefix 000de140 + assetName
+//	Both stored in DB as raw strings. buildNFTUnit() in handler.go
+//	hex-encodes the name portion before sending to the sidecar.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 package nft
 
 import (
@@ -108,8 +128,10 @@ func (s *Service) PrepareMint(ctx context.Context, req MintRequest) (*MintResult
 		req.OwnerID,
 		"", // policy_id filled after blockchain tx
 		assetName,
-		"000643b0"+assetName, // ref token name (100 prefix)
-		"001bc280"+assetName, // user token name (222 prefix)
+		// CIP-68 label 100 = 0x000643b0 — reference token
+		"000643b0"+assetName,
+		// CIP-68 label 222 = 0x000de140 — user token
+		"000de140"+assetName,
 		req.Name,
 		req.Description,
 		imageIPFS,

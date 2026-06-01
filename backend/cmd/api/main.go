@@ -1,3 +1,22 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// cmd/api/main.go
+//
+// LankaNFT API Server — Entry Point
+//
+// Responsibilities:
+//   - Load environment variables from .env
+//   - Connect to PostgreSQL
+//   - Configure CORS for the Vue frontend
+//   - Register all HTTP route groups (auth, nft, listing, batch)
+//   - Run per-user token bucket rate limiter (5 mint req/min, burst 3)
+//   - Start HTTP server on PORT (default 8080)
+//
+// Architecture:
+//   All business logic lives in internal/* packages.
+//   main.go only wires them together — it contains no business logic itself.
+//   Exception: /health endpoint is inline here intentionally (no handler needed).
+// ─────────────────────────────────────────────────────────────────────────────
+
 package main
 
 import (
@@ -121,13 +140,8 @@ func main() {
 	})
 
 	{
-		protected.GET("/me", func(c *gin.Context) {
-			userID := c.GetString("user_id")
-			c.JSON(200, gin.H{
-				"user_id": userID,
-				"message": "you are authenticated",
-			})
-		})
+		// Wires up the authenticated context handler from the auth package
+		protected.GET("/me", authHandler.GetMe)
 
 		nftHandler := nft.NewHandler(db.DB)
 		nftHandler.RegisterRoutes(protected)
