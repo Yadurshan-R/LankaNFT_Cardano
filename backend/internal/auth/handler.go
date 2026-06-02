@@ -1,240 +1,216 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// internal/auth/service.go
+//
+// # Auth Service — OTP generation, verification, and wallet user management
+//
+// Responsibilities:
+//   - GenerateOTP: create 6-digit code, store in DB with 10min expiry
+//   - VerifyOTP: validate code, create user + custodial wallet on first login
+//   - UpsertExternalWalletUser: create or find user by wallet address
+//   - GetUserInfo: return wallet_type + wallet_address for /api/me
+//
+// Two user types:
+//
+//	custodial — signed in via Email OTP, wallet managed by LankaNFT
+//	external  — signed in via CIP-30 wallet (Nami/Eternl/Lace), user holds keys
+//
+// ─────────────────────────────────────────────────────────────────────────────
 package auth
 
 import (
-	"net/http"
-	"os"
+	"context"
+	"crypto/rand"
+	"fmt"
+	"math/big"
+	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
+	"NFT_Minting_Platform/pkg/blockchain"
+	"NFT_Minting_Platform/pkg/crypto"
 
-	"NFT_Minting_Platform/pkg/email"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Handler holds the auth service
-type Handler struct {
-	service *Service
+// Service handles all auth business logic
+type Service struct {
+	db               *pgxpool.Pool
+	blockchainClient *blockchain.Client
 }
 
-// NewHandler creates a new auth handler
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
-}
-
-// RegisterRoutes registers all auth routes on the router
-func (h *Handler) RegisterRoutes(router *gin.Engine) {
-	auth := router.Group("/auth")
-	{
-		auth.POST("/request-otp", h.RequestOTP)
-		auth.POST("/verify-otp", h.VerifyOTP)
-		auth.GET("/nonce", h.GetNonce)
-		auth.POST("/wallet-verify", h.WalletVerify)
-		auth.POST("/logout", h.Logout)
+// NewService creates a new auth service
+func NewService(db *pgxpool.Pool) *Service {
+	return &Service{
+		db:               db,
+		blockchainClient: blockchain.NewClient(),
 	}
 }
 
-// GetMe godoc
-// GET /api/me
-// Returns current authenticated context user ID and message.
-// Prepares user parameters for upcoming external wallet tracking features.
-func (h *Handler) GetMe(c *gin.Context) {
-	userID := c.GetString("user_id")
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
+// GenerateOTP generates a random 6-digit code and stores it in the DB
+func (s *Service) GenerateOTP(ctx context.Context, email string) (string, error) {
+	code := ""
+	for i := 0; i < 6; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(10))
+		if err != nil {
+			return "", fmt.Errorf("failed to generate OTP: %w", err)
+		}
+		code += n.String()
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"user_id": userID,
-		"message": "you are authenticated",
-	})
-}
+	expiry := time.Now().Add(10 * time.Minute)
 
-// RequestOTP godoc
-// POST /auth/request-otp
-// Body: { "email": "user@example.com" }
-// Generates a 6-digit OTP and sends it via Email
-func (h *Handler) RequestOTP(c *gin.Context) {
-	var body struct {
-		Email string `json:"email" binding:"required,email"`
-	}
-
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "valid email is required"})
-		return
-	}
-
-	// Generate and store OTP
-	code, err := h.service.GenerateOTP(c.Request.Context(), body.Email)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate OTP"})
-		return
-	}
-
-	// Send OTP via MAIL
-	if err := email.SendOTP(body.Email, code); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send OTP email"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "OTP sent to " + body.Email,
-	})
-}
-
-// VerifyOTP godoc
-// POST /auth/verify-otp
-// Body: { "email": "user@example.com", "code": "123456" }
-// Verifies OTP, creates user if new, returns JWT in httpOnly cookie
-func (h *Handler) VerifyOTP(c *gin.Context) {
-	var body struct {
-		Email string `json:"email" binding:"required,email"`
-		Code  string `json:"code" binding:"required,len=6"`
-	}
-
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email and 6-digit code are required"})
-		return
-	}
-
-	// Verify OTP and get or create user
-	userID, err := h.service.VerifyOTP(c.Request.Context(), body.Email, body.Code)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired OTP"})
-		return
-	}
-
-	// Generate JWT token
-	token, err := generateJWT(userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
-		return
-	}
-
-	// Set JWT in httpOnly cookie
-	// httpOnly = true means JavaScript cannot read it (XSS protection)
-	c.SetCookie(
-		"auth_token",               // cookie name
-		token,                      // value
-		3600*24*7,                  // max age: 7 days in seconds
-		"/",                        // path
-		os.Getenv("COOKIE_DOMAIN"), // domain from .env
-		false,                      // secure: set true in production (HTTPS)
-		true,                       // httpOnly: JS cannot access this cookie
-	)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "logged in successfully",
-		"user_id": userID,
-	})
-}
-
-// GetNonce godoc
-// GET /auth/nonce?wallet=addr1...
-// Returns a random challenge string for wallet signature verification
-func (h *Handler) GetNonce(c *gin.Context) {
-	walletAddress := c.Query("wallet")
-	if walletAddress == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "wallet address is required"})
-		return
-	}
-
-	// Generate a unique nonce — wallet user signs this to prove ownership
-	nonce := "Sign this message to login to NFT Minting Platform: " +
-		walletAddress + " " +
-		time.Now().Format(time.RFC3339)
-
-	c.JSON(http.StatusOK, gin.H{
-		"nonce": nonce,
-	})
-}
-
-// WalletVerify godoc
-// POST /auth/wallet-verify
-// Body: { "wallet_address": "addr1...", "wallet_name": "lace", "signature": "..." }
-// Verifies the wallet signature and returns JWT in httpOnly cookie
-func (h *Handler) WalletVerify(c *gin.Context) {
-	var body struct {
-		WalletAddress string `json:"wallet_address" binding:"required"`
-		WalletName    string `json:"wallet_name" binding:"required"`
-		Signature     string `json:"signature" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "wallet_address, wallet_name and signature are required"})
-		return
-	}
-
-	// TODO: verify the Cardano signature cryptographically
-	// For now we trust the wallet address (add full verification in Phase 2)
-	// Full verification will check the signature against the nonce using
-	// the wallet's public key via the cardano-addresses library
-
-	// Create or find user by wallet address
-	userID, err := h.service.UpsertExternalWalletUser(
-		c.Request.Context(),
-		body.WalletAddress,
-		body.WalletName,
+	// Delete any existing unused OTPs for this email
+	_, err := s.db.Exec(ctx,
+		"DELETE FROM otp_codes WHERE email = $1 AND used = FALSE",
+		email,
 	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process wallet login"})
-		return
+		return "", fmt.Errorf("failed to clear old OTPs: %w", err)
 	}
 
-	// Generate JWT token
-	token, err := generateJWT(userID)
+	_, err = s.db.Exec(ctx,
+		"INSERT INTO otp_codes (email, code, expires_at) VALUES ($1, $2, $3)",
+		email, code, expiry,
+	)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
-		return
+		return "", fmt.Errorf("failed to store OTP: %w", err)
 	}
 
-	// Set JWT in httpOnly cookie
-	c.SetCookie(
-		"auth_token",
-		token,
-		3600*24*7,
-		"/",
-		os.Getenv("COOKIE_DOMAIN"),
-		false,
-		true,
-	)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "wallet logged in successfully",
-		"user_id": userID,
-	})
+	return code, nil
 }
 
-// Logout godoc
-// POST /auth/logout
-// Clears the auth cookie
-func (h *Handler) Logout(c *gin.Context) {
-	c.SetCookie(
-		"auth_token",
-		"",
-		-1, // negative max age = delete immediately
-		"/",
-		os.Getenv("COOKIE_DOMAIN"),
-		false,
-		true,
-	)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "logged out successfully",
-	})
-}
-
-// generateJWT creates a signed JWT token containing the user ID
-// Token expires in 7 days
-func generateJWT(userID string) (string, error) {
-	secret := os.Getenv("JWT_SECRET")
-
-	claims := jwt.MapClaims{
-		"user_id": userID,
-		"exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"iat":     time.Now().Unix(),
+// VerifyOTP checks if the given code is valid for the email.
+// Returns the user ID — creates user + custodial wallet if first login.
+func (s *Service) VerifyOTP(ctx context.Context, email, code string) (string, error) {
+	var otpID string
+	err := s.db.QueryRow(ctx, `
+		SELECT id FROM otp_codes
+		WHERE email = $1
+		AND code = $2
+		AND used = FALSE
+		AND expires_at > NOW()
+	`, email, code).Scan(&otpID)
+	if err != nil {
+		return "", fmt.Errorf("invalid or expired OTP")
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(secret))
+	// Mark OTP as used so it cannot be reused
+	_, err = s.db.Exec(ctx,
+		"UPDATE otp_codes SET used = TRUE WHERE id = $1",
+		otpID,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to mark OTP as used: %w", err)
+	}
+
+	// Check if user already exists
+	var userID string
+	err = s.db.QueryRow(ctx,
+		"SELECT id FROM users WHERE email = $1",
+		email,
+	).Scan(&userID)
+
+	if err != nil {
+		// New user — create account with custodial wallet type
+		err = s.db.QueryRow(ctx, `
+			INSERT INTO users (email, wallet_type)
+			VALUES ($1, 'custodial')
+			RETURNING id
+		`, email).Scan(&userID)
+		if err != nil {
+			return "", fmt.Errorf("failed to create user: %w", err)
+		}
+
+		// Generate custodial wallet via blockchain sidecar
+		walletData, err := s.blockchainClient.GenerateWallet()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate wallet: %w", err)
+		}
+
+		// Encrypt mnemonic before storing — never store plaintext
+		mnemonicStr := strings.Join(walletData.Mnemonic, " ")
+		encryptedMnemonic, err := crypto.Encrypt(mnemonicStr)
+		if err != nil {
+			return "", fmt.Errorf("failed to encrypt mnemonic: %w", err)
+		}
+
+		_, err = s.db.Exec(ctx, `
+			INSERT INTO custodial_wallets (user_id, wallet_address, encrypted_mnemonic)
+			VALUES ($1, $2, $3)
+		`, userID, walletData.Address, encryptedMnemonic)
+		if err != nil {
+			return "", fmt.Errorf("failed to store wallet: %w", err)
+		}
+	}
+
+	return userID, nil
+}
+
+// UpsertExternalWalletUser creates or finds a user by wallet address.
+// Called when a user logs in via CIP-30 (Nami/Eternl/Lace).
+// External wallet users hold their own keys — LankaNFT never touches them.
+func (s *Service) UpsertExternalWalletUser(ctx context.Context, walletAddress, walletName string) (string, error) {
+	// Check if this external wallet is already registered
+	var userID string
+	err := s.db.QueryRow(ctx,
+		"SELECT user_id FROM external_wallets WHERE wallet_address = $1",
+		walletAddress,
+	).Scan(&userID)
+
+	if err != nil {
+		// New wallet user — create user record first
+		err = s.db.QueryRow(ctx, `
+			INSERT INTO users (wallet_type)
+			VALUES ('external')
+			RETURNING id
+		`).Scan(&userID)
+		if err != nil {
+			return "", fmt.Errorf("failed to create user: %w", err)
+		}
+
+		// Store the external wallet address + which wallet app they used
+		_, err = s.db.Exec(ctx, `
+			INSERT INTO external_wallets (user_id, wallet_address, wallet_name)
+			VALUES ($1, $2, $3)
+		`, userID, walletAddress, walletName)
+		if err != nil {
+			return "", fmt.Errorf("failed to store wallet: %w", err)
+		}
+	}
+
+	return userID, nil
+}
+
+// GetUserInfo returns the wallet_type and wallet_address for a given user.
+//
+// Used by GET /api/me so the frontend knows:
+//   - wallet_type: 'custodial' → user signed in via email, LankaNFT holds keys
+//   - wallet_type: 'external' → user signed in via CIP-30, they hold their own keys
+//   - wallet_address: the on-chain address, used for Blockfrost queries
+//
+// This is called on every page load (via checkAuth in auth store) so the
+// frontend always knows which user type it's dealing with.
+func (s *Service) GetUserInfo(ctx context.Context, userID string) (walletType string, walletAddress string, err error) {
+	// Get wallet type from users table
+	err = s.db.QueryRow(ctx,
+		"SELECT COALESCE(wallet_type, 'custodial') FROM users WHERE id = $1",
+		userID,
+	).Scan(&walletType)
+	if err != nil {
+		return "", "", fmt.Errorf("user not found: %w", err)
+	}
+
+	// Get wallet address from the appropriate table
+	if walletType == "custodial" {
+		s.db.QueryRow(ctx,
+			"SELECT COALESCE(wallet_address, '') FROM custodial_wallets WHERE user_id = $1",
+			userID,
+		).Scan(&walletAddress)
+	} else {
+		s.db.QueryRow(ctx,
+			"SELECT COALESCE(wallet_address, '') FROM external_wallets WHERE user_id = $1",
+			userID,
+		).Scan(&walletAddress)
+	}
+
+	return walletType, walletAddress, nil
 }

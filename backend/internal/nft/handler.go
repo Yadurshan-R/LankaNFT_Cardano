@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"time"
 
 	"NFT_Minting_Platform/pkg/blockchain"
 
@@ -40,6 +42,12 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 		nft.GET("/wallet", h.GetWallet)
 		nft.GET("/stats", h.GetStats)
 		nft.GET("/balance", h.GetWalletBalance)
+		nft.GET("/external-assets", h.GetExternalAssets)
+
+		// External wallet unsigned routes
+		nft.POST("/mint-unsigned", h.MintNFTUnsigned)
+		nft.POST("/transfer-unsigned", h.TransferNFTUnsigned)
+		nft.POST("/confirm-transfer", h.ConfirmTransfer)
 	}
 }
 
@@ -398,15 +406,32 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 // GetWalletBalance godoc
 // GET /api/nft/balance
-// Returns the tADA balance of the user's custodial wallet from Blockfrost
+//
+// Returns the tADA balance of the user's wallet from Blockfrost.
+// Works for both custodial and external wallet users:
+//
+//	custodial → address from custodial_wallets table
+//	external  → address from external_wallets table
 func (h *Handler) GetWalletBalance(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	// Get wallet address
-	_, address, err := h.service.GetWalletForUser(c.Request.Context(), userID)
+	// Try custodial wallet first
+	var address string
+	err := h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM custodial_wallets WHERE user_id = $1",
+		userID,
+	).Scan(&address)
+
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
-		return
+		// Not a custodial user — try external wallet
+		err = h.service.db.QueryRow(c.Request.Context(),
+			"SELECT wallet_address FROM external_wallets WHERE user_id = $1",
+			userID,
+		).Scan(&address)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "wallet not found"})
+			return
+		}
 	}
 
 	// Fetch balance from Blockfrost
@@ -429,20 +454,26 @@ func (h *Handler) GetWalletBalance(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	// Parse Blockfrost response
+	// Address exists but has no transactions yet — return zero balance
+	if resp.StatusCode == 404 {
+		c.JSON(http.StatusOK, gin.H{
+			"wallet_address": address,
+			"lovelace":       "0",
+		})
+		return
+	}
+
 	var bf struct {
 		Amount []struct {
 			Unit     string `json:"unit"`
 			Quantity string `json:"quantity"`
 		} `json:"amount"`
 	}
-
 	if err := json.NewDecoder(resp.Body).Decode(&bf); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse balance"})
 		return
 	}
 
-	// Find lovelace amount
 	lovelace := "0"
 	for _, a := range bf.Amount {
 		if a.Unit == "lovelace" {
@@ -466,17 +497,6 @@ func (h *Handler) RegisterPublicRoutes(router *gin.Engine) {
 
 // GetCertificate godoc
 // GET /api/certificate/:id
-//
-// Returns public certificate data for a minted NFT.
-// No authentication required — certificate URLs are designed to be
-// shared publicly (with buyers, galleries, on social media).
-//
-// Security decisions:
-//   - Only 'minted' and 'listed' NFTs are returned. Pending/failed/transferred
-//     NFTs return 404 — no certificate until the NFT exists on-chain.
-//   - Owner email is never exposed — only the wallet address, which is
-//     already public on the Cardano blockchain.
-//   - NFT existence is not confirmed on 404 — prevents enumeration attacks.
 func (h *Handler) GetCertificate(c *gin.Context) {
 	nftID := c.Param("id")
 	if nftID == "" {
@@ -484,9 +504,6 @@ func (h *Handler) GetCertificate(c *gin.Context) {
 		return
 	}
 
-	// Fetch NFT details + owner wallet address in one query.
-	// LEFT JOIN on custodial_wallets — some NFTs may have been transferred
-	// to external wallets, in which case owner_address will be empty string.
 	var (
 		id, nftName, description, imageIPFS string
 		policyID, assetName, txHash         string
@@ -526,7 +543,6 @@ func (h *Handler) GetCertificate(c *gin.Context) {
 		return
 	}
 
-	// Build Cardanoscan links — empty string if no tx hash yet
 	cardanoscanTx := ""
 	cardanoscanAsset := ""
 	if txHash != "" {
@@ -535,28 +551,346 @@ func (h *Handler) GetCertificate(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		// Core NFT identity
-		"id":          id,
-		"nft_name":    nftName,
-		"description": description,
-		"image_ipfs":  imageIPFS,
-
-		// On-chain proof of authenticity
-		"policy_id":     policyID,
-		"asset_name":    assetName,
-		"tx_hash":       txHash,
-		"owner_address": ownerAddress,
-
-		// Certificate metadata
-		"status":    status,
-		"royalties": royalties,
-		"privacy":   privacy,
-		"minted_at": createdAt,
-		"network":   "Cardano Preprod",
-		"platform":  "LankaNFT",
-
-		// Direct links for verification
+		"id":                id,
+		"nft_name":          nftName,
+		"description":       description,
+		"image_ipfs":        imageIPFS,
+		"policy_id":         policyID,
+		"asset_name":        assetName,
+		"tx_hash":           txHash,
+		"owner_address":     ownerAddress,
+		"status":            status,
+		"royalties":         royalties,
+		"privacy":           privacy,
+		"minted_at":         createdAt,
+		"network":           "Cardano Preprod",
+		"platform":          "LankaNFT",
 		"cardanoscan_tx":    cardanoscanTx,
 		"cardanoscan_asset": cardanoscanAsset,
+	})
+}
+
+// GetExternalAssets godoc
+// GET /api/nft/external-assets
+//
+// Returns all NFTs held in an external wallet (Nami/Eternl/Lace) by
+// querying Blockfrost directly. Only available to external wallet users.
+func (h *Handler) GetExternalAssets(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	// Get this user's external wallet address
+	var walletAddress string
+	err := h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1",
+		userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "external wallet not found"})
+		return
+	}
+
+	blockfrostURL := os.Getenv("BLOCKFROST_BASE_URL")
+	blockfrostKey := os.Getenv("BLOCKFROST_PROJECT_ID")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// ── Step 1: get all assets at this wallet address ──
+	url := fmt.Sprintf("%s/addresses/%s/assets", blockfrostURL, walletAddress)
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("project_id", blockfrostKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch assets from Blockfrost"})
+		return
+	}
+	defer resp.Body.Close()
+
+	// 404 = address has never received any transactions yet — return empty list
+	if resp.StatusCode == 404 {
+		c.JSON(http.StatusOK, gin.H{"nfts": []interface{}{}, "count": 0, "wallet_address": walletAddress})
+		return
+	}
+
+	var assets []struct {
+		Unit     string `json:"unit"`
+		Quantity string `json:"quantity"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&assets); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to parse asset list"})
+		return
+	}
+
+	// ── Step 2: fetch metadata for each NFT ──
+	var nfts []map[string]interface{}
+
+	for _, asset := range assets {
+		// Skip lovelace (ADA) and fungible tokens (quantity > 1)
+		if asset.Unit == "lovelace" || asset.Quantity != "1" {
+			continue
+		}
+
+		// Fetch detailed asset info from Blockfrost
+		assetURL := fmt.Sprintf("%s/assets/%s", blockfrostURL, asset.Unit)
+		assetReq, _ := http.NewRequest("GET", assetURL, nil)
+		assetReq.Header.Set("project_id", blockfrostKey)
+
+		assetResp, err := client.Do(assetReq)
+		if err != nil {
+			continue
+		}
+
+		var assetData struct {
+			Asset           string `json:"asset"`
+			PolicyID        string `json:"policy_id"`
+			AssetName       string `json:"asset_name"` // hex-encoded
+			OnchainMetadata *struct {
+				Name        interface{} `json:"name"`
+				Image       interface{} `json:"image"`
+				Description interface{} `json:"description"`
+			} `json:"onchain_metadata"`
+		}
+
+		if err := json.NewDecoder(assetResp.Body).Decode(&assetData); err != nil {
+			assetResp.Body.Close()
+			continue
+		}
+		assetResp.Body.Close()
+
+		// Skip CIP-68 reference tokens (label 100 = 0x000643b0)
+		// These are metadata holders, not the tradeable NFTs
+		if strings.HasPrefix(assetData.AssetName, "000643b0") {
+			continue
+		}
+
+		// Build the NFT entry with whatever metadata is available
+		nftEntry := map[string]interface{}{
+			"id":              asset.Unit, // use full unit as ID for external NFTs
+			"policy_id":       assetData.PolicyID,
+			"asset_name":      assetData.AssetName,
+			"user_token_name": assetData.AssetName, // already hex-encoded from Blockfrost
+			"status":          "minted",
+			"source":          "external", // distinguishes from platform-minted NFTs
+			"wallet_address":  walletAddress,
+		}
+
+		// Parse on-chain metadata if available
+		if assetData.OnchainMetadata != nil {
+			// Name — string
+			if name, ok := assetData.OnchainMetadata.Name.(string); ok {
+				nftEntry["name"] = name
+			} else {
+				nftEntry["name"] = assetData.AssetName
+			}
+
+			// Description — string
+			if desc, ok := assetData.OnchainMetadata.Description.(string); ok {
+				nftEntry["description"] = desc
+			}
+
+			// Image — can be a plain string or CIP-25 array of strings
+			switch img := assetData.OnchainMetadata.Image.(type) {
+			case string:
+				nftEntry["image"] = img
+			case []interface{}:
+				// CIP-25 allows image as array of strings — join them
+				var parts []string
+				for _, p := range img {
+					if s, ok := p.(string); ok {
+						parts = append(parts, s)
+					}
+				}
+				nftEntry["image"] = strings.Join(parts, "")
+			}
+		} else {
+			// No on-chain metadata — use hex asset name as display name
+			nftEntry["name"] = assetData.AssetName
+		}
+
+		nfts = append(nfts, nftEntry)
+	}
+
+	if nfts == nil {
+		nfts = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"nfts":           nfts,
+		"count":          len(nfts),
+		"wallet_address": walletAddress,
+	})
+}
+
+// MintNFTUnsigned godoc
+// POST /api/nft/mint-unsigned
+//
+// Builds an unsigned CIP-68 mint transaction for external wallet users.
+// Returns unsigned CBOR — the frontend signs with CIP-30 and submits.
+//
+// After signing and submitting, the frontend calls POST /api/nft/confirm-mint
+// with { nft_id, tx_hash, policy_id } to update the DB.
+//
+// Body: { nft_id }
+// The nft_id must be a pending NFT belonging to the authenticated user.
+func (h *Handler) MintNFTUnsigned(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		NFTID       string   `json:"nft_id" binding:"required"`
+		WalletUtxos []string `json:"wallet_utxos"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nft_id is required"})
+		return
+	}
+
+	// Verify NFT belongs to this user and is pending
+	var assetName, metadataIPFS, imageIPFS string
+	var royalties float64
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT asset_name, metadata_ipfs, image_ipfs, royalties
+		FROM nfts WHERE id = $1 AND owner_id = $2 AND status = 'pending'
+	`, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not pending"})
+		return
+	}
+
+	// Get this user's external wallet address
+	var walletAddress string
+	err = h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1",
+		userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external wallet not found — are you logged in with a wallet?"})
+		return
+	}
+
+	// Build unsigned tx via sidecar
+	result, err := h.service.blockchainClient.MintNFTUnsigned(blockchain.MintNFTUnsignedRequest{
+		WalletAddress: walletAddress,
+		WalletUtxos:   body.WalletUtxos,
+		AssetName:     assetName,
+		MetadataIPFS:  metadataIPFS,
+		ImageIPFS:     imageIPFS,
+		Royalties:     royalties,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build mint tx: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"unsigned_cbor": result.UnsignedCbor,
+		"policy_id":     result.PolicyID,
+		"nft_id":        body.NFTID,
+		"asset_name":    assetName,
+	})
+}
+
+// TransferNFTUnsigned godoc
+// POST /api/nft/transfer-unsigned
+//
+// Builds an unsigned transfer transaction for external wallet users.
+// Body: { nft_id, recipient_address }
+func (h *Handler) TransferNFTUnsigned(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		NFTID            string `json:"nft_id" binding:"required"`
+		RecipientAddress string `json:"recipient_address" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify NFT belongs to this user and is minted (not listed)
+	var policyID, userTokenName, nftStatus string
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT policy_id, user_token_name, status
+		FROM nfts WHERE id = $1 AND owner_id = $2
+	`, body.NFTID, userID).Scan(&policyID, &userTokenName, &nftStatus)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not yours"})
+		return
+	}
+	if nftStatus == "listed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cancel the listing before transferring"})
+		return
+	}
+
+	// Get external wallet address
+	var walletAddress string
+	err = h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1", userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external wallet not found"})
+		return
+	}
+
+	nftUnit := buildNFTUnit(policyID, userTokenName)
+
+	result, err := h.service.blockchainClient.TransferNFTUnsigned(blockchain.TransferNFTUnsignedRequest{
+		WalletAddress:    walletAddress,
+		NFTUnit:          nftUnit,
+		RecipientAddress: body.RecipientAddress,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build transfer tx: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"unsigned_cbor":     result.UnsignedCbor,
+		"nft_id":            body.NFTID,
+		"recipient_address": body.RecipientAddress,
+	})
+}
+
+// ConfirmTransfer godoc
+// POST /api/nft/confirm-transfer
+//
+// Called after external wallet user signs and submits a transfer tx.
+// Updates NFT ownership in the DB.
+// Body: { nft_id, tx_hash, recipient_address }
+func (h *Handler) ConfirmTransfer(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		NFTID            string `json:"nft_id" binding:"required"`
+		TxHash           string `json:"tx_hash" binding:"required"`
+		RecipientAddress string `json:"recipient_address" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if recipient is another platform user
+	var recipientUserID string
+	dbErr := h.service.db.QueryRow(c.Request.Context(),
+		"SELECT user_id FROM custodial_wallets WHERE wallet_address = $1",
+		body.RecipientAddress,
+	).Scan(&recipientUserID)
+
+	if dbErr == nil {
+		// Transfer to custodial user — update ownership
+		h.service.db.Exec(c.Request.Context(),
+			"UPDATE nfts SET owner_id = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3",
+			recipientUserID, body.NFTID, userID,
+		)
+	} else {
+		// Transfer to external — mark as transferred
+		h.service.db.Exec(c.Request.Context(),
+			"UPDATE nfts SET status = 'transferred', updated_at = NOW() WHERE id = $1 AND owner_id = $2",
+			body.NFTID, userID,
+		)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "transfer confirmed",
+		"tx_hash": body.TxHash,
 	})
 }

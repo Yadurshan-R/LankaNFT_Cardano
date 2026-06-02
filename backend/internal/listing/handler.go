@@ -46,6 +46,14 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 		l.POST("/cancel", h.CancelListing)
 		l.GET("/all", h.GetAllListings)
 		l.GET("/mine", h.GetMyListings)
+
+		// External wallet unsigned routes
+		l.POST("/create-unsigned", h.CreateListingUnsigned)
+		l.POST("/buy-unsigned", h.BuyListingUnsigned)
+		l.POST("/cancel-unsigned", h.CancelListingUnsigned)
+		l.POST("/confirm-create", h.ConfirmCreateListing)
+		l.POST("/confirm-buy", h.ConfirmBuyListing)
+		l.POST("/confirm-cancel", h.ConfirmCancelListing)
 	}
 }
 
@@ -448,4 +456,285 @@ func splitUTxO(utxo string) [2]string {
 		}
 	}
 	return [2]string{utxo, "0"}
+}
+
+// CreateListingUnsigned godoc
+// POST /api/listing/create-unsigned
+// Body: { nft_id, price_lovelace }
+func (h *Handler) CreateListingUnsigned(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		NFTID         string `json:"nft_id" binding:"required"`
+		PriceLovelace int64  `json:"price_lovelace" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify ownership and get NFT data
+	var policyID, userTokenName string
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT policy_id, user_token_name
+		FROM nfts WHERE id = $1 AND owner_id = $2 AND status = 'minted'
+	`, body.NFTID, userID).Scan(&policyID, &userTokenName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not minted"})
+		return
+	}
+	royaltyPolicyID := policyID // royalty policy = minting policy for CIP-68 NFTs
+
+	// Get external wallet address
+	var walletAddress string
+	err = h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1", userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external wallet not found"})
+		return
+	}
+
+	nftUnit := buildNFTUnit(policyID, userTokenName)
+
+	result, err := h.service.blockchainClient.ListNFTUnsigned(blockchain.ListNFTUnsignedRequest{
+		WalletAddress:   walletAddress,
+		NFTUnit:         nftUnit,
+		PriceLovelace:   body.PriceLovelace,
+		RoyaltyPolicyID: royaltyPolicyID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build listing tx: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"unsigned_cbor":     result.UnsignedCbor,
+		"nft_id":            body.NFTID,
+		"price_lovelace":    body.PriceLovelace,
+		"nft_policy_id":     policyID,
+		"nft_asset_name":    userTokenName,
+		"royalty_policy_id": royaltyPolicyID,
+	})
+}
+
+// ConfirmCreateListing godoc
+// POST /api/listing/confirm-create
+// Called after external wallet signs and submits the listing tx.
+// Body: { nft_id, tx_hash, price_lovelace, nft_policy_id, nft_asset_name, royalty_policy_id }
+func (h *Handler) ConfirmCreateListing(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		NFTID           string `json:"nft_id" binding:"required"`
+		TxHash          string `json:"tx_hash" binding:"required"`
+		PriceLovelace   int64  `json:"price_lovelace" binding:"required"`
+		NFTPolicyID     string `json:"nft_policy_id" binding:"required"`
+		NFTAssetName    string `json:"nft_asset_name" binding:"required"`
+		RoyaltyPolicyID string `json:"royalty_policy_id"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	listingID, err := h.service.CreateListing(
+		c.Request.Context(),
+		body.NFTID, userID, body.TxHash,
+		body.PriceLovelace,
+		body.NFTPolicyID, body.NFTAssetName,
+		body.RoyaltyPolicyID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create listing: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "listing confirmed",
+		"listing_id": listingID,
+		"tx_hash":    body.TxHash,
+	})
+}
+
+// BuyListingUnsigned godoc
+// POST /api/listing/buy-unsigned
+// Body: { listing_id }
+func (h *Handler) BuyListingUnsigned(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		ListingID string `json:"listing_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Fetch listing details
+	var listingSellerID, scriptUTxO, sellerAddress, nftPolicyID, nftAssetName, royaltyPolicyID string
+	var priceLovelace int64
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT l.seller_id, l.script_utxo, cw.wallet_address,
+		       l.price_lovelace, l.nft_policy_id, l.nft_asset_name, l.royalty_policy_id
+		FROM listings l
+		JOIN custodial_wallets cw ON cw.user_id = l.seller_id
+		WHERE l.id = $1 AND l.status = 'active'
+	`, body.ListingID).Scan(
+		&listingSellerID, &scriptUTxO, &sellerAddress,
+		&priceLovelace, &nftPolicyID, &nftAssetName, &royaltyPolicyID,
+	)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "active listing not found"})
+		return
+	}
+
+	// Prevent self-purchase
+	if listingSellerID == userID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot buy your own listing"})
+		return
+	}
+
+	// Get buyer's external wallet address
+	var walletAddress string
+	err = h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1", userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external wallet not found"})
+		return
+	}
+
+	utxoParts := splitUTxO(scriptUTxO)
+	nftUnit := buildNFTUnit(nftPolicyID, nftAssetName)
+
+	result, err := h.service.blockchainClient.BuyNFTUnsigned(blockchain.BuyNFTUnsignedRequest{
+		WalletAddress:    walletAddress,
+		ListingUTxOHash:  utxoParts[0],
+		ListingUTxOIndex: utxoParts[1],
+		SellerAddress:    sellerAddress,
+		PriceLovelace:    priceLovelace,
+		NFTUnit:          nftUnit,
+		RoyaltyPolicyID:  royaltyPolicyID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build buy tx: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"unsigned_cbor": result.UnsignedCbor,
+		"listing_id":    body.ListingID,
+	})
+}
+
+// ConfirmBuyListing godoc
+// POST /api/listing/confirm-buy
+// Body: { listing_id, tx_hash }
+func (h *Handler) ConfirmBuyListing(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		ListingID string `json:"listing_id" binding:"required"`
+		TxHash    string `json:"tx_hash" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get the NFT ID to update ownership
+	var nftID string
+	h.service.db.QueryRow(c.Request.Context(),
+		"SELECT nft_id FROM listings WHERE id = $1", body.ListingID,
+	).Scan(&nftID)
+
+	if err := h.service.MarkListingSold(c.Request.Context(), body.ListingID, body.TxHash, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm purchase"})
+		return
+	}
+
+	// Update NFT ownership to buyer
+	h.service.db.Exec(c.Request.Context(),
+		"UPDATE nfts SET owner_id = $1, status = 'minted', updated_at = NOW() WHERE id = $2",
+		userID, nftID,
+	)
+
+	c.JSON(http.StatusOK, gin.H{"message": "purchase confirmed", "tx_hash": body.TxHash})
+}
+
+// CancelListingUnsigned godoc
+// POST /api/listing/cancel-unsigned
+// Body: { listing_id }
+func (h *Handler) CancelListingUnsigned(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		ListingID string `json:"listing_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Verify seller owns this listing
+	var scriptUTxO, nftPolicyID, nftAssetName string
+	err := h.service.db.QueryRow(c.Request.Context(), `
+		SELECT script_utxo, nft_policy_id, nft_asset_name
+		FROM listings WHERE id = $1 AND seller_id = $2 AND status = 'active'
+	`, body.ListingID, userID).Scan(&scriptUTxO, &nftPolicyID, &nftAssetName)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "active listing not found or not yours"})
+		return
+	}
+
+	// Get external wallet address
+	var walletAddress string
+	err = h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1", userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external wallet not found"})
+		return
+	}
+
+	utxoParts := splitUTxO(scriptUTxO)
+	nftUnit := buildNFTUnit(nftPolicyID, nftAssetName)
+
+	result, err := h.service.blockchainClient.CancelListingUnsigned(blockchain.CancelListingUnsignedRequest{
+		WalletAddress:    walletAddress,
+		ListingUTxOHash:  utxoParts[0],
+		ListingUTxOIndex: utxoParts[1],
+		NFTUnit:          nftUnit,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build cancel tx: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"unsigned_cbor": result.UnsignedCbor,
+		"listing_id":    body.ListingID,
+	})
+}
+
+// ConfirmCancelListing godoc
+// POST /api/listing/confirm-cancel
+// Body: { listing_id, tx_hash }
+func (h *Handler) ConfirmCancelListing(c *gin.Context) {
+	var body struct {
+		ListingID string `json:"listing_id" binding:"required"`
+		TxHash    string `json:"tx_hash" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.service.MarkListingCancelled(c.Request.Context(), body.ListingID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm cancellation"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "cancellation confirmed", "tx_hash": body.TxHash})
 }

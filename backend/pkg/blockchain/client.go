@@ -25,7 +25,7 @@ func NewClient() *Client {
 		baseURL: os.Getenv("BLOCKCHAIN_SERVICE_URL"),
 		secret:  os.Getenv("BLOCKCHAIN_SERVICE_SECRET"),
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 180 * time.Second, // Updated to 180s for Blockfrost retries
 		},
 	}
 }
@@ -241,6 +241,178 @@ func (c *Client) GenerateWallet() (*GenerateWalletResponse, error) {
 	var result GenerateWalletResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode wallet response: %w", err)
+	}
+	return &result, nil
+}
+
+// ─── Unsigned Mint ────────────────────────────────────────────────────────────
+
+// MintNFTUnsignedRequest is sent to the sidecar to build an unsigned mint tx.
+// Used for external wallet users — wallet_address replaces mnemonic.
+type MintNFTUnsignedRequest struct {
+	WalletAddress string   `json:"wallet_address"`
+	WalletUtxos   []string `json:"wallet_utxos"`
+	AssetName     string   `json:"asset_name"`
+	MetadataIPFS  string   `json:"metadata_ipfs"`
+	ImageIPFS     string   `json:"image_ipfs"`
+	Royalties     float64  `json:"royalties"`
+}
+
+// MintNFTUnsignedResponse contains the unsigned CBOR + policy info.
+// Frontend signs the CBOR, submits, then calls /api/nft/confirm-mint.
+type MintNFTUnsignedResponse struct {
+	UnsignedCbor  string `json:"unsigned_cbor"`
+	PolicyID      string `json:"policy_id"`
+	AssetName     string `json:"asset_name"`
+	RefTokenName  string `json:"ref_token_name"`
+	UserTokenName string `json:"user_token_name"`
+}
+
+func (c *Client) MintNFTUnsigned(req MintNFTUnsignedRequest) (*MintNFTUnsignedResponse, error) {
+	resp, err := c.post("/api/mint/single-unsigned", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result MintNFTUnsignedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode unsigned mint response: %w", err)
+	}
+	return &result, nil
+}
+
+// ─── Unsigned List ────────────────────────────────────────────────────────────
+
+type ListNFTUnsignedRequest struct {
+	WalletAddress   string `json:"wallet_address"`
+	NFTUnit         string `json:"nft_unit"`
+	PriceLovelace   int64  `json:"price_lovelace"`
+	RoyaltyPolicyID string `json:"royalty_policy_id"`
+}
+
+type ListNFTUnsignedResponse struct {
+	UnsignedCbor string `json:"unsigned_cbor"`
+}
+
+func (c *Client) ListNFTUnsigned(req ListNFTUnsignedRequest) (*ListNFTUnsignedResponse, error) {
+	resp, err := c.post("/api/marketplace/list-unsigned", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result ListNFTUnsignedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode unsigned list response: %w", err)
+	}
+	return &result, nil
+}
+
+// ─── Unsigned Buy ─────────────────────────────────────────────────────────────
+
+type BuyNFTUnsignedRequest struct {
+	WalletAddress    string `json:"wallet_address"`
+	ListingUTxOHash  string `json:"listing_utxo_hash"`
+	ListingUTxOIndex string `json:"listing_utxo_index"`
+	SellerAddress    string `json:"seller_address"`
+	PriceLovelace    int64  `json:"price_lovelace"`
+	NFTUnit          string `json:"nft_unit"`
+	RoyaltyPolicyID  string `json:"royalty_policy_id"`
+}
+
+type BuyNFTUnsignedResponse struct {
+	UnsignedCbor string `json:"unsigned_cbor"`
+}
+
+func (c *Client) BuyNFTUnsigned(req BuyNFTUnsignedRequest) (*BuyNFTUnsignedResponse, error) {
+	resp, err := c.post("/api/marketplace/buy-unsigned", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result BuyNFTUnsignedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode unsigned buy response: %w", err)
+	}
+	return &result, nil
+}
+
+// ─── Unsigned Cancel ──────────────────────────────────────────────────────────
+
+type CancelListingUnsignedRequest struct {
+	WalletAddress    string `json:"wallet_address"`
+	ListingUTxOHash  string `json:"listing_utxo_hash"`
+	ListingUTxOIndex string `json:"listing_utxo_index"`
+	NFTUnit          string `json:"nft_unit"`
+}
+
+type CancelListingUnsignedResponse struct {
+	UnsignedCbor string `json:"unsigned_cbor"`
+}
+
+func (c *Client) CancelListingUnsigned(req CancelListingUnsignedRequest) (*CancelListingUnsignedResponse, error) {
+	resp, err := c.post("/api/marketplace/cancel-unsigned", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result CancelListingUnsignedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode unsigned cancel response: %w", err)
+	}
+	return &result, nil
+}
+
+// ─── Unsigned Transfer ────────────────────────────────────────────────────────
+
+type TransferNFTUnsignedRequest struct {
+	WalletAddress    string `json:"wallet_address"`
+	NFTUnit          string `json:"nft_unit"`
+	RecipientAddress string `json:"recipient_address"`
+}
+
+type TransferNFTUnsignedResponse struct {
+	UnsignedCbor     string `json:"unsigned_cbor"`
+	NFTUnit          string `json:"nft_unit"`
+	RecipientAddress string `json:"recipient_address"`
+}
+
+func (c *Client) TransferNFTUnsigned(req TransferNFTUnsignedRequest) (*TransferNFTUnsignedResponse, error) {
+	resp, err := c.post("/api/transfer/unsigned", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result TransferNFTUnsignedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode unsigned transfer response: %w", err)
+	}
+	return &result, nil
+}
+
+// ─── Submit Signed Transaction ────────────────────────────────────────────────
+
+// SubmitTxRequest sends a signed CBOR transaction to the sidecar for submission.
+type SubmitTxRequest struct {
+	UnsignedCbor string `json:"unsigned_cbor"`
+	WitnessCbor  string `json:"witness_cbor"`
+}
+
+// SubmitTxResponse returns the submitted transaction hash.
+type SubmitTxResponse struct {
+	TxHash string `json:"tx_hash"`
+}
+
+// SubmitTx submits a signed CBOR transaction via the sidecar's Blockfrost connection.
+// Used for external wallet users — wallet signs, backend submits reliably.
+func (c *Client) SubmitTx(req SubmitTxRequest) (*SubmitTxResponse, error) {
+	resp, err := c.post("/api/submit", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result SubmitTxResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode submit response: %w", err)
 	}
 	return &result, nil
 }

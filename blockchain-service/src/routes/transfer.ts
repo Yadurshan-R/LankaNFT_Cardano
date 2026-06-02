@@ -97,4 +97,47 @@ router.post("/", async (req: Request, res: Response) => {
   }
 });
 
+router.post("/unsigned", async (req: Request, res: Response) => {
+  try {
+    const { wallet_address, nft_unit, recipient_address } = req.body;
+
+    if (!wallet_address || !nft_unit || !recipient_address) {
+      res.status(400).json({ error: "wallet_address, nft_unit and recipient_address are required" });
+      return;
+    }
+
+    const provider = new BlockfrostProvider(config.blockfrost.projectId);
+    const utxos = await provider.fetchAddressUTxOs(wallet_address);
+
+    if (utxos.length === 0) {
+      res.status(400).json({ error: "Wallet has no UTxOs" });
+      return;
+    }
+
+    const nftUtxo = utxos.find((u) =>
+      u.output.amount.some((a) => a.unit === nft_unit)
+    );
+    if (!nftUtxo) {
+      res.status(400).json({ error: "NFT not found in wallet" });
+      return;
+    }
+
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+    const unsignedTx = await txBuilder
+      .txOut(recipient_address, [
+        { unit: nft_unit, quantity: "1" },
+        { unit: "lovelace", quantity: "2000000" },
+      ])
+      .changeAddress(wallet_address)
+      .selectUtxosFrom(utxos)
+      .complete();
+
+    res.json({ unsigned_cbor: unsignedTx, nft_unit, recipient_address });
+  } catch (error: any) {
+    const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
+    console.error("[TRANSFER-UNSIGNED] Error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
 export default router;

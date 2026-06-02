@@ -1,14 +1,8 @@
-<!-- ─────────────────────────────────────────────────────────────────────────
-  WalletPopup.vue — wallet details popup, shown when user clicks wallet icon
-  
-  Shows: truncated address, network badge, ADA balance, Cardanoscan link
-  Security note reassures custodial wallet users their funds are safe
-──────────────────────────────────────────────────────────────────────────── -->
 <template>
   <div class="popup" @click.stop>
     <div class="popup-header">
       <Wallet :size="13" class="popup-header-icon" />
-      <span>Custodial Wallet</span>
+      <span>{{ walletType === 'external' ? 'External Wallet' : 'Custodial Wallet' }}</span>
     </div>
 
     <div class="popup-row">
@@ -39,7 +33,7 @@
 
     <div class="popup-security">
       <Lock :size="11" />
-      AES-256 encrypted · Only you can access
+      {{ walletType === 'external' ? 'Self-custodied · You hold your own keys' : 'AES-256 encrypted · Only you can access' }}
     </div>
   </div>
 </template>
@@ -51,6 +45,7 @@ import { ExternalLink, Lock, Wallet } from 'lucide-vue-next'
 const props = defineProps<{
   address: string
   lovelace: string
+  walletType?: string
 }>()
 
 defineEmits<{ (e: 'close'): void }>()

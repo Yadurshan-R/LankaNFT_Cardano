@@ -2,7 +2,7 @@
   <div class="wallet-card">
     <div class="wallet-header">
       <Wallet :size="20" color="#fff" />
-      <div class="wallet-label">Custodial Wallet</div>
+      <div class="wallet-label">{{ walletType === 'external' ? 'External Wallet' : 'Custodial Wallet' }}</div>
       <div class="wallet-network">Preprod</div>
     </div>
 
@@ -42,6 +42,7 @@ import { Check, Copy, Wallet } from 'lucide-vue-next'
 const props = defineProps<{
   address: string
   lovelace: string
+  walletType?: string
 }>()
 
 const copied = ref(false)

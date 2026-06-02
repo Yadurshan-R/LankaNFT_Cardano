@@ -1,19 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// blockchain-service/src/routes/marketplace.ts
-//
-// Marketplace routes: list, buy, cancel
-//
-// Key Cardano reality this file handles:
-//   Blockfrost indexing delay — after a tx is submitted, the new UTxOs
-//   take ~20-40 seconds to appear in Blockfrost queries (one block time).
-//   Cancel and Buy both need the listing UTxO to be visible at the script
-//   address. If we query too soon, Blockfrost returns nothing and the tx
-//   fails. We handle this with retry logic (up to 5 attempts, 6s apart).
-//
-// Stale listing protection is handled in the Go backend before this sidecar
-// is called — see internal/listing/handler.go CreateListing.
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { Router, Request, Response } from "express";
 import {
   BlockfrostProvider,
@@ -501,6 +485,224 @@ router.post("/cancel", async (req: Request, res: Response) => {
   } catch (error: any) {
     const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
     console.error("[MARKETPLACE] Cancel error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ─── POST /list-unsigned ──────────────────────────────────────────────────────
+router.post("/list-unsigned", async (req: Request, res: Response) => {
+  try {
+    const { wallet_address, nft_unit, price_lovelace, royalty_policy_id = "" } = req.body;
+
+    if (!wallet_address || !nft_unit || !price_lovelace) {
+      res.status(400).json({ error: "wallet_address, nft_unit, price_lovelace required" });
+      return;
+    }
+
+    const provider = new BlockfrostProvider(config.blockfrost.projectId);
+    const utxos = await provider.fetchAddressUTxOs(wallet_address);
+
+    if (utxos.length === 0) {
+      res.status(400).json({ error: "Wallet has no UTxOs" });
+      return;
+    }
+
+    const policyId = nft_unit.slice(0, 56);
+    const assetNameHex = nft_unit.slice(56);
+
+    const listingDatumCbor = buildListingDatum(
+      wallet_address,
+      price_lovelace,
+      policyId,
+      assetNameHex,
+      royalty_policy_id
+    );
+
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+    const unsignedTx = await txBuilder
+      .txOut(marketplaceAddress, [
+        { unit: nft_unit, quantity: "1" },
+        { unit: "lovelace", quantity: LISTING_MIN_ADA_LOVELACE },
+      ])
+      .txOutInlineDatumValue(listingDatumCbor, "CBOR")
+      .changeAddress(wallet_address)
+      .selectUtxosFrom(utxos)
+      .complete();
+
+    res.json({ unsigned_cbor: unsignedTx, marketplace_address: marketplaceAddress });
+  } catch (error: any) {
+    const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
+    console.error("[LIST-UNSIGNED] Error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ─── POST /buy-unsigned ───────────────────────────────────────────────────────
+router.post("/buy-unsigned", async (req: Request, res: Response) => {
+  try {
+    const {
+      wallet_address,
+      listing_utxo_hash,
+      listing_utxo_index,
+      seller_address,
+      price_lovelace,
+      nft_unit,
+      royalty_amount = 0,
+      royalty_address = "",
+      royalty_utxo_hash = "",
+      royalty_utxo_index = 0,
+    } = req.body;
+
+    if (!wallet_address || !listing_utxo_hash || !seller_address || !price_lovelace || !nft_unit) {
+      res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+
+    const provider = new BlockfrostProvider(config.blockfrost.projectId);
+    const utxos = await provider.fetchAddressUTxOs(wallet_address);
+    const buyerAddress = wallet_address;
+
+    const collateralUtxo = findCollateralUtxo(utxos);
+    if (!collateralUtxo) {
+      res.status(400).json({
+        error: "Your wallet needs a pure ADA UTxO of at least 5 ADA for collateral.",
+      });
+      return;
+    }
+
+    const listingUtxo = await fetchListingUtxoWithRetry(
+      provider,
+      listing_utxo_hash,
+      parseInt(listing_utxo_index.toString())
+    );
+    if (!listingUtxo) {
+      res.status(404).json({
+        error: "Listing not found on-chain. It may have already been sold or cancelled.",
+      });
+      return;
+    }
+
+    const sellerAmount = price_lovelace - royalty_amount;
+    const marketplaceScript = applyCborEncoding(marketplaceValidator.compiledCode);
+
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+    txBuilder
+      .spendingPlutusScriptV3()
+      .txIn(
+        listingUtxo.input.txHash,
+        listingUtxo.input.outputIndex,
+        listingUtxo.output.amount,
+        listingUtxo.output.address
+      )
+      .txInInlineDatumPresent()
+      .txInRedeemerValue("d87980", "CBOR")
+      .txInScript(marketplaceScript)
+      .txInCollateral(
+        collateralUtxo.input.txHash,
+        collateralUtxo.input.outputIndex,
+        collateralUtxo.output.amount,
+        collateralUtxo.output.address
+      )
+      .requiredSignerHash(resolvePaymentKeyHash(buyerAddress))
+      .txOut(buyerAddress, [{ unit: nft_unit, quantity: "1" }])
+      .txOut(seller_address, [{ unit: "lovelace", quantity: sellerAmount.toString() }])
+      .txOut(buyerAddress, [{ unit: "lovelace", quantity: "5000000" }]);
+
+    if (royalty_amount > 0 && royalty_address) {
+      txBuilder.txOut(royalty_address, [
+        { unit: "lovelace", quantity: royalty_amount.toString() },
+      ]);
+    }
+    if (royalty_utxo_hash) {
+      txBuilder.readOnlyTxInReference(royalty_utxo_hash, royalty_utxo_index);
+    }
+
+    const unsignedTx = await txBuilder
+      .changeAddress(buyerAddress)
+      .selectUtxosFrom(
+        utxos.filter(
+          (u) =>
+            u.input.txHash !== collateralUtxo.input.txHash ||
+            u.input.outputIndex !== collateralUtxo.input.outputIndex
+        )
+      )
+      .complete();
+
+    res.json({ unsigned_cbor: unsignedTx });
+  } catch (error: any) {
+    const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
+    console.error("[BUY-UNSIGNED] Error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+// ─── POST /cancel-unsigned ────────────────────────────────────────────────────
+router.post("/cancel-unsigned", async (req: Request, res: Response) => {
+  try {
+    const { wallet_address, listing_utxo_hash, listing_utxo_index, nft_unit } = req.body;
+
+    if (!wallet_address || !listing_utxo_hash || !nft_unit) {
+      res.status(400).json({ error: "Missing required fields" });
+      return;
+    }
+
+    const provider = new BlockfrostProvider(config.blockfrost.projectId);
+    const utxos = await provider.fetchAddressUTxOs(wallet_address);
+
+    const collateralUtxo = findCollateralUtxo(utxos);
+    if (!collateralUtxo) {
+      res.status(400).json({ error: "Wallet needs a pure ADA UTxO of at least 5 ADA for collateral" });
+      return;
+    }
+
+    const listingUtxo = await fetchListingUtxoWithRetry(
+      provider,
+      listing_utxo_hash,
+      parseInt((listing_utxo_index ?? 0).toString())
+    );
+    if (!listingUtxo) {
+      res.status(404).json({
+        error: "Listing not found on-chain. It may have already been sold or cancelled.",
+      });
+      return;
+    }
+
+    const marketplaceScript = applyCborEncoding(marketplaceValidator.compiledCode);
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+
+    const unsignedTx = await txBuilder
+      .spendingPlutusScriptV3()
+      .txIn(
+        listingUtxo.input.txHash,
+        listingUtxo.input.outputIndex,
+        listingUtxo.output.amount,
+        listingUtxo.output.address
+      )
+      .txInInlineDatumPresent()
+      .txInRedeemerValue("d87a80", "CBOR")
+      .txInScript(marketplaceScript)
+      .txInCollateral(
+        collateralUtxo.input.txHash,
+        collateralUtxo.input.outputIndex,
+        collateralUtxo.output.amount,
+        collateralUtxo.output.address
+      )
+      .txOut(wallet_address, [{ unit: nft_unit, quantity: "1" }])
+      .changeAddress(wallet_address)
+      .selectUtxosFrom(
+        utxos.filter(
+          (u) =>
+            u.input.txHash !== collateralUtxo.input.txHash ||
+            u.input.outputIndex !== collateralUtxo.input.outputIndex
+        )
+      )
+      .requiredSignerHash(resolvePaymentKeyHash(wallet_address))
+      .complete();
+
+    res.json({ unsigned_cbor: unsignedTx });
+  } catch (error: any) {
+    const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
+    console.error("[CANCEL-UNSIGNED] Error:", message);
     res.status(500).json({ error: message });
   }
 });

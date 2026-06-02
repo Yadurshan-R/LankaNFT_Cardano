@@ -1,22 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// cmd/api/main.go
-//
-// LankaNFT API Server — Entry Point
-//
-// Responsibilities:
-//   - Load environment variables from .env
-//   - Connect to PostgreSQL
-//   - Configure CORS for the Vue frontend
-//   - Register all HTTP route groups (auth, nft, listing, batch)
-//   - Run per-user token bucket rate limiter (5 mint req/min, burst 3)
-//   - Start HTTP server on PORT (default 8080)
-//
-// Architecture:
-//   All business logic lives in internal/* packages.
-//   main.go only wires them together — it contains no business logic itself.
-//   Exception: /health endpoint is inline here intentionally (no handler needed).
-// ─────────────────────────────────────────────────────────────────────────────
-
 package main
 
 import (
@@ -37,6 +18,7 @@ import (
 	"NFT_Minting_Platform/internal/listing"
 	"NFT_Minting_Platform/internal/middleware"
 	"NFT_Minting_Platform/internal/nft"
+	"NFT_Minting_Platform/pkg/blockchain"
 )
 
 // ─── Per-user rate limiter ─────────────────────────────────────────────────────
@@ -152,6 +134,28 @@ func main() {
 
 		listingHandler := listing.NewHandler(db.DB)
 		listingHandler.RegisterRoutes(protected)
+
+		// POST /api/submit — submit a signed tx from external wallet via backend
+		protected.POST("/submit", func(c *gin.Context) {
+			var body struct {
+				UnsignedCbor string `json:"unsigned_cbor" binding:"required"`
+				WitnessCbor  string `json:"witness_cbor" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&body); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unsigned_cbor and witness_cbor are required"})
+				return
+			}
+			blockchainClient := blockchain.NewClient()
+			result, err := blockchainClient.SubmitTx(blockchain.SubmitTxRequest{
+				UnsignedCbor: body.UnsignedCbor,
+				WitnessCbor:  body.WitnessCbor,
+			})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to submit transaction: " + err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"tx_hash": result.TxHash})
+		})
 	}
 
 	port := os.Getenv("PORT")

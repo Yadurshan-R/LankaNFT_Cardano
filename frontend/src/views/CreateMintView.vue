@@ -144,7 +144,16 @@ import MetadataForm from '@/components/mint/MetadataForm.vue'
 import PrivacySelector from '@/components/mint/PrivacySelector.vue'
 import MintStrategy from '@/components/mint/MintStrategy.vue'
 
+import { useAuthStore } from '@/stores/auth'
+import { useWalletSession } from '@/composables/useWalletSession'
+import { useDashboardStore } from '@/stores/dashboard'
+import { mintNFTUnsigned, confirmMint, submitSignedTx } from '@/services/nft'
+
 const nftStore = useNFTStore()
+
+const auth          = useAuthStore()
+const walletSession = useWalletSession()
+const dashboard     = useDashboardStore()
 
 const selectedFile  = ref<File | null>(null)
 const uploadMode    = ref<'single' | 'batch'>('single')
@@ -179,7 +188,7 @@ function stepClass(step: number) {
   return 'step--pending'
 }
 
-function onFileSelected(file: File)           { selectedFile.value = file }
+function onFileSelected(file: File)            { selectedFile.value = file }
 function onMetadataUpdate(data: typeof metadata) { Object.assign(metadata, data) }
 
 // Translate raw API errors to friendly messages
@@ -204,6 +213,7 @@ async function handleMint() {
     nftStore.error = 'Please enter a description for your NFT.'
     return
   }
+
   const formData = new FormData()
   formData.append('file', selectedFile.value)
   formData.append('name', metadata.name)
@@ -212,12 +222,48 @@ async function handleMint() {
   formData.append('total_supply', metadata.totalSupply)
   formData.append('privacy', privacy.value)
 
+  // Step 1 — prepare (upload to IPFS, create DB record) — same for both wallet types
   const prepared = await nftStore.prepare(formData)
   if (!prepared) return
-  const minted = await nftStore.mint(prepared.nft_id)
-  if (!minted) return
-  lastTxHash.value = minted.tx_hash
-  mintSuccess.value = true
+
+  if (auth.walletType === 'external') {
+    try {
+      nftStore.isLoading = true
+      nftStore.error     = null
+
+      // Step 1 — get all UTxOs from HD wallet (funds across multiple addresses)
+      const walletUtxos = await walletSession.getUtxos()
+
+      // Step 2 — backend builds unsigned tx using these UTxOs
+      const unsignedRes = await mintNFTUnsigned(prepared.nft_id, walletUtxos)
+
+      // Step 3 — Lace SIGNS the tx body → returns witness set CBOR (not full tx)
+      const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
+
+      // Step 4 — backend assembles full tx (body + witness) and submits via Blockfrost
+      const txHash = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
+
+      // Step 5 — confirm in DB: status=minted, tx_hash, policy_id
+      await confirmMint(prepared.nft_id, txHash, unsignedRes.policy_id)
+
+      lastTxHash.value  = txHash
+      mintSuccess.value = true
+      await dashboard.loadDashboard()
+
+    } catch (err: any) {
+      console.error('MINT ERROR:', err)
+      const message = err?.message || err?.info || 'Minting failed. Please try again.'
+      nftStore.error = message
+    } finally {
+      nftStore.isLoading = false
+    }
+  } else {
+    // Custodial wallet flow — backend handles all signing
+    const minted = await nftStore.mint(prepared.nft_id)
+    if (!minted) return
+    lastTxHash.value  = minted.tx_hash
+    mintSuccess.value = true
+  }
 }
 
 function resetForm() {

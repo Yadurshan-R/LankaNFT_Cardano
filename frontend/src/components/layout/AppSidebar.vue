@@ -13,7 +13,7 @@
     <div class="sidebar-divider" />
 
     <nav class="sidebar-nav">
-      <router-link to="/"     exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="20" /><span class="sidebar-label">Dashboard</span></router-link>
+      <router-link to="/"      exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="20" /><span class="sidebar-label">Dashboard</span></router-link>
       <router-link to="/mint"   active-class="sidebar-item--active"       class="sidebar-item"><Sparkles         :size="20" /><span class="sidebar-label">Create Mint</span></router-link>
       <router-link to="/browse" active-class="sidebar-item--active"       class="sidebar-item"><LayoutGrid       :size="20" /><span class="sidebar-label">Browse Mints</span></router-link>
     </nav>
@@ -40,6 +40,7 @@
         v-if="isWalletOpen && isExpanded"
         :address="dashboard.walletAddress"
         :lovelace="dashboard.lovelace"
+        :walletType="auth.walletType ?? undefined"
         @close="isWalletOpen = false"
       />
 
@@ -59,11 +60,13 @@ import { useRouter } from 'vue-router'
 import { Activity, LayoutDashboard, LayoutGrid, LogOut, Settings, Sparkles, Wallet } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useDashboardStore } from '@/stores/dashboard'
+import { useWalletSession } from '@/composables/useWalletSession'
 import WalletPopup from '@/components/layout/WalletPopup.vue'
 
-const router    = useRouter()
-const auth      = useAuthStore()
-const dashboard = useDashboardStore()
+const router        = useRouter()
+const auth          = useAuthStore()
+const dashboard     = useDashboardStore()
+const walletSession = useWalletSession()
 
 const isExpanded   = ref(false)
 const isWalletOpen = ref(false)
@@ -80,7 +83,9 @@ function onMouseLeave() {
 }
 
 async function handleLogout() {
+  walletSession.clearWallet()
   auth.logout()
+  dashboard.reset()
   router.push('/auth')
 }
 </script>

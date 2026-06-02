@@ -14,6 +14,8 @@ import {
 import config from "../config";
 import fs from "fs";
 import path from "path";
+import * as cborLib from 'cbor';
+import { bech32 } from 'bech32';
 
 const router = Router();
 
@@ -41,6 +43,51 @@ const royaltyLockAddress = serializePlutusScript(
   undefined,
   0
 ).address;
+
+// ─── UTxO Parser for CIP-30 Wallets (HD Wallet Fix) ──────────────────────────
+function parseCip30Utxos(cborUtxos: string[]): any[] {
+  return cborUtxos.map(hex => {
+    const decoded = cborLib.decodeAllSync(Buffer.from(hex, 'hex'))[0];
+    const utxoData = decoded?.value ?? decoded;
+    const [txInput, txOutput] = Array.isArray(utxoData) ? utxoData : [utxoData[0], utxoData[1]];
+
+    const txHash = Buffer.from(txInput[0]).toString('hex');
+    const outputIndex = Number(txInput[1]);
+
+    // Parse address bytes to bech32
+    const addrBytes = Buffer.from(Array.isArray(txOutput) ? txOutput[0] : txOutput.get(0));
+    const headerByte = addrBytes[0];
+    const prefix = (headerByte & 0x0f) === 1 ? 'addr' : 'addr_test';
+    const address = bech32.encode(prefix, bech32.toWords(addrBytes), 1000);
+
+    // Parse ADA amount
+    const rawAmount = Array.isArray(txOutput) ? txOutput[1] : txOutput.get(1);
+    let lovelace = '0';
+    const assets: Array<{unit: string, quantity: string}> = [];
+
+    if (typeof rawAmount === 'bigint' || typeof rawAmount === 'number') {
+      lovelace = rawAmount.toString();
+    } else if (Array.isArray(rawAmount)) {
+      lovelace = rawAmount[0].toString();
+      if (rawAmount[1] instanceof Map) {
+        for (const [policyId, assetMap] of rawAmount[1]) {
+          const policyHex = Buffer.from(policyId).toString('hex');
+          for (const [name, qty] of assetMap) {
+            assets.push({
+              unit: policyHex + Buffer.from(name).toString('hex'),
+              quantity: qty.toString()
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      input: { txHash, outputIndex },
+      output: { address, amount: [{ unit: 'lovelace', quantity: lovelace }, ...assets] }
+    };
+  });
+}
 
 router.post("/single", async (req: Request, res: Response) => {
   try {
@@ -173,6 +220,130 @@ router.post("/single", async (req: Request, res: Response) => {
   } catch (error: any) {
     const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
     console.error("Mint error:", message);
+    res.status(500).json({ error: message });
+  }
+});
+
+router.post("/single-unsigned", async (req: Request, res: Response) => {
+  try {
+    const { wallet_address, wallet_utxos, asset_name, metadata_ipfs, image_ipfs, royalties = 0 } = req.body;
+
+    if (!wallet_address || !asset_name || !metadata_ipfs) {
+      res.status(400).json({ error: "wallet_address, asset_name and metadata_ipfs are required" });
+      return;
+    }
+
+    const provider = new BlockfrostProvider(config.blockfrost.projectId);
+
+    let utxos: any[];
+    if (wallet_utxos && wallet_utxos.length > 0) {
+      utxos = parseCip30Utxos(wallet_utxos);
+    } else {
+      utxos = await provider.fetchAddressUTxOs(wallet_address);
+    }
+    
+    if (utxos.length === 0) {
+      res.status(400).json({ error: "Wallet has no UTxOs — fund the wallet first" });
+      return;
+    }
+
+    // Pure-ADA UTxOs for one-shot minting policy and collateral
+    const pureAdaUtxos = utxos.filter((u) =>
+      u.output.amount.every((a: any) => a.unit === "lovelace")
+    );
+    if (pureAdaUtxos.length < 2) {
+      res.status(400).json({
+        error: "Need at least 2 pure-ADA UTxOs. Send at least 10 tADA to your wallet.",
+      });
+      return;
+    }
+
+    const sortedPureAda = pureAdaUtxos.sort((a, b) => {
+      const aAda = parseInt(a.output.amount.find((x: any) => x.unit === "lovelace")?.quantity || "0");
+      const bAda = parseInt(b.output.amount.find((x: any) => x.unit === "lovelace")?.quantity || "0");
+      return aAda - bAda;
+    });
+
+    const oneShotUtxo = sortedPureAda[0]!;
+    const txHash = oneShotUtxo.input.txHash;
+    const txIndex = oneShotUtxo.input.outputIndex;
+    const collateralUtxo = sortedPureAda[sortedPureAda.length - 1]!;
+
+    // Build minting policy (same as signed route — policy depends on one-shot UTxO)
+    const outputRef = mConStr0([txHash, txIndex]);
+    const mintBlueprint = new MintingBlueprint("V3");
+    mintBlueprint.paramScript(mintSingleValidator.compiledCode, [outputRef], "Mesh");
+    const policyId = mintBlueprint.hash;
+    const mintScript = mintBlueprint.cbor;
+
+    const assetNameHex = stringToHex(asset_name);
+    const refTokenName = "000643b0" + assetNameHex;
+    const userTokenName = "001bc280" + assetNameHex;
+    const royaltyTokenName = "001f4d70" + assetNameHex;
+
+    const royaltyRate = Math.floor((royalties / 100) * 1_000_000);
+    const cip68Datum = mConStr0([
+      [
+        [stringToHex("name"),        stringToHex(asset_name)],
+        [stringToHex("image"),       stringToHex(image_ipfs)],
+        [stringToHex("mediaType"),   stringToHex("image/png")],
+        [stringToHex("description"), stringToHex("")],
+        [stringToHex("files"),       []],
+      ],
+      1,
+    ]);
+    const cip68DatumCbor = serializeData(cip68Datum);
+
+    const royaltyDatum = mConStr0([
+      stringToHex(wallet_address),
+      mConStr0([
+        [mConStr0([stringToHex(wallet_address), royaltyRate])],
+        2_000_000,
+      ]),
+      policyId,
+    ]);
+    const royaltyDatumCbor = serializeData(royaltyDatum);
+
+    const redeemer = mConStr0([assetNameHex, mConStr1([])]);
+    const redeemerCbor = serializeData(redeemer);
+
+    // Build tx — identical to signed route
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider });
+    const unsignedTx = await txBuilder
+      .txIn(txHash, txIndex)
+      .mintPlutusScriptV3()
+      .mint("1", policyId, refTokenName)
+      .mintingScript(mintScript)
+      .mintRedeemerValue(redeemerCbor, "CBOR")
+      .mintPlutusScriptV3()
+      .mint("1", policyId, userTokenName)
+      .mintingScript(mintScript)
+      .mintRedeemerValue(redeemerCbor, "CBOR")
+      .mintPlutusScriptV3()
+      .mint("1", policyId, royaltyTokenName)
+      .mintingScript(mintScript)
+      .mintRedeemerValue(redeemerCbor, "CBOR")
+      .txOut(wallet_address, [{ unit: policyId + userTokenName, quantity: "1" }])
+      .txOut(immutableLockAddress, [{ unit: policyId + refTokenName, quantity: "1" }])
+      .txOutInlineDatumValue(cip68DatumCbor, "CBOR")
+      .txOut(royaltyLockAddress, [{ unit: policyId + royaltyTokenName, quantity: "1" }])
+      .txOutInlineDatumValue(royaltyDatumCbor, "CBOR")
+      .changeAddress(wallet_address)
+      .selectUtxosFrom(utxos)
+      .txInCollateral(collateralUtxo.input.txHash, collateralUtxo.input.outputIndex)
+      .complete();
+
+    // Return unsigned CBOR + policy info needed for confirm-mint call
+    res.json({
+      unsigned_cbor:    unsignedTx,
+      policy_id:        policyId,
+      asset_name,
+      ref_token_name:   refTokenName,
+      user_token_name:  userTokenName,
+    });
+  } catch (error: any) {
+    const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
+    console.error("[MINT-UNSIGNED] Error:", message);
     res.status(500).json({ error: message });
   }
 });

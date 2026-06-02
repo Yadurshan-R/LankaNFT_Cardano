@@ -18,6 +18,7 @@ import mintRouter from "./routes/mint";
 import batchRouter from "./routes/batch";
 import marketplaceRouter from "./routes/marketplace";
 import transferRouter from "./routes/transfer";
+import { BlockfrostProvider } from "@meshsdk/core";
 
 dotenv.config();
 
@@ -84,6 +85,56 @@ app.use("/api/marketplace", marketplaceRouter);
 
 // NFT transfer — send any NFT to another address
 app.use("/api/transfer", transferRouter);
+
+// POST /api/submit
+//
+// Submits a signed transaction CBOR to Cardano via Blockfrost.
+// Used by external wallet users — Lace signs but cannot reliably submit.
+// Blockfrost submission is more reliable than wallet.submitTx().
+//
+// Body: { unsigned_cbor: string, witness_cbor: string }
+// Returns: { tx_hash: string }
+app.post("/api/submit", async (req, res) => {
+  try {
+    const { unsigned_cbor, witness_cbor } = req.body;
+    if (!unsigned_cbor || !witness_cbor) {
+      res.status(400).json({ error: "unsigned_cbor and witness_cbor are required" });
+      return;
+    }
+
+    // Cardano Serialization Library — assembles tx correctly
+    // Available as @emurgo/cardano-serialization-lib-nodejs (MeshSDK dependency)
+    const CSL = require('@emurgo/cardano-serialization-lib-nodejs');
+
+    // Parse the unsigned transaction built by MeshSDK
+    const unsignedTx = CSL.Transaction.from_hex(unsigned_cbor);
+
+    // Parse the witness set returned by Lace's signTx()
+    const witnessSet = CSL.TransactionWitnessSet.from_hex(witness_cbor);
+
+    // Assemble the full signed transaction:
+    //   transaction = [body, witness_set, is_valid, auxiliary_data]
+    // The body hash stays identical so Lace's signature remains valid.
+    const signedTx = CSL.Transaction.new(
+      unsignedTx.body(),
+      witnessSet,
+      unsignedTx.auxiliary_data() ?? undefined
+    );
+
+    // Convert to hex and submit via Blockfrost
+    const signedCbor = Buffer.from(signedTx.to_bytes()).toString('hex');
+    const provider = new BlockfrostProvider(config.blockfrost.projectId);
+    const txHash = await provider.submitTx(signedCbor);
+
+    console.log("[SUBMIT] Transaction submitted:", txHash);
+    res.json({ tx_hash: txHash });
+
+  } catch (error: any) {
+    const message = typeof error === "string" ? error : error?.message || JSON.stringify(error);
+    console.error("[SUBMIT] Error:", message);
+    res.status(500).json({ error: message });
+  }
+});
 
 app.listen(config.port, () => {
   console.log(`Blockchain service running on port ${config.port}`);
