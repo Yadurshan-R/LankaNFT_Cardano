@@ -22,9 +22,12 @@
               :alt="nftName"
               class="nft-thumb"
               @error="imgError = true"
+              @load="imgLoaded = true"
+              :style="{ opacity: imgLoaded ? 1 : 0 }"
             />
-            <div v-else class="nft-thumb-placeholder">
-              <ImageIcon :size="22" color="#ccc" />
+            <div v-if="!imgLoaded || imgError || !imageUrl" class="nft-thumb-placeholder">
+              <Loader2 v-if="imageUrl && !imgLoaded && !imgError" :size="18" color="#ccc" class="spin" />
+              <ImageIcon v-else :size="22" color="#ccc" />
             </div>
             <div class="nft-info">
               <p class="nft-name">{{ nftName }}</p>
@@ -90,7 +93,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Check, CheckCircle, Copy, ExternalLink, X, Image as ImageIcon } from 'lucide-vue-next'
+import { Check, CheckCircle, Copy, ExternalLink, X, Image as ImageIcon, Loader2 } from 'lucide-vue-next'
 import { cardanoscanTokenUrl, cardanoscanTxUrl } from '@/utils/cardano'
 
 const props = defineProps<{
@@ -107,6 +110,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const copied = ref(false)
 const imgError = ref(false)
+const imgLoaded = ref(false)
 
 const imageUrl = computed(() => {
   if (!props.imageIpfs) return null
@@ -183,6 +187,7 @@ async function copyHash() {
   width: 52px; height: 52px;
   border-radius: 8px; object-fit: cover;
   background: #f0f0f0; flex-shrink: 0;
+  transition: opacity 0.3s ease;
 }
 .nft-thumb-placeholder {
   width: 52px; height: 52px;
@@ -231,9 +236,15 @@ async function copyHash() {
   background: #085041; display: inline-block;
   animation: pulse 1.5s infinite;
 }
+
+/* Spin Animation for Loader2 */
+.spin { animation: spin 0.8s linear infinite; }
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.5; transform: scale(0.85); }
+}
+@keyframes spin { 
+  to { transform: rotate(360deg); } 
 }
 
 /* Buttons */

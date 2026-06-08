@@ -395,7 +395,6 @@ function onClose()   {
   overflow-y: auto;
 }
 
-.panel-name-section {}
 .panel-nft-name {
   font-size: 24px; font-weight: 700; color: #111;
   margin: 0 0 6px;
