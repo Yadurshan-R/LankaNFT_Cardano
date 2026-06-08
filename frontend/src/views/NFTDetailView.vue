@@ -59,19 +59,15 @@
         </div>
 
         <div class="secondary-actions">
-          <a :href="ipfsUrl" target="_blank" rel="noopener noreferrer" class="btn-secondary" title="View Asset">
-            <ExternalLink :size="13" /> View Asset
-          </a>
-
           <a
-            v-if="nft.policy_id && nft.user_token_name"
-            :href="cardanoscanUrl"
+            v-if="viewAssetUrl"
+            :href="viewAssetUrl"
             target="_blank"
             rel="noopener noreferrer"
             class="btn-secondary"
             title="View on Cardanoscan"
           >
-            <ExternalLink :size="13" /> Cardanoscan
+            <ExternalLink :size="13" /> View Asset
           </a>
 
           <router-link
@@ -433,6 +429,20 @@ const formattedDate = computed(() => {
     year: 'numeric', month: 'long', day: 'numeric',
   })
 })
+
+// Builds the correct Cardanoscan token URL regardless of how the NFT was loaded
+// (platform DB, external Blockfrost, or older records without user_token_name)
+const viewAssetUrl = computed(() => {
+  const p = nft.value?.policy_id
+  if (!p) return null
+  // user_token_name = "001bc280RawName" (with CIP-68 prefix)
+  // asset_name = "RawName" (no prefix) — used as fallback
+  const t = nft.value?.user_token_name
+    || ('001bc280' + (nft.value?.asset_name || ''))
+  if (!t || t === '001bc280') return null
+  return cardanoscanTokenUrl(p, t)
+})
+
 const activeListing = computed(() =>
   dashboard.myListings.find(
     (l: any) => l.nft_id === nft.value?.id && l.status === 'active'
@@ -805,6 +815,7 @@ onUnmounted(() => {
 .fee-note        { font-size: 10px; color: #aaa; }
 .fee-divider     { height: 1px; background: #ebebeb; margin: 2px 0; }
 
+/* Keep these just in case any other components bleed into this view, but the UI uses TxSuccessCard */
 .confirmed-card {
   border-radius: 12px; padding: 14px;
   display: flex; flex-direction: column; gap: 8px;
