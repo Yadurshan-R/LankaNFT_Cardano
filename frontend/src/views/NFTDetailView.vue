@@ -547,15 +547,18 @@ async function handleTransfer() {
       const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
       const txHash      = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
       await confirmTransfer(nft.value.id, txHash, transferAddress.value)
+      
       transferTxHash.value    = txHash
       transferConfirmed.value = true
     } else {
       const result = await transferNFT(nft.value.id, transferAddress.value)
+      
       transferTxHash.value    = result.tx_hash
       transferConfirmed.value = true
     }
     showTransferForm.value = false
-    await dashboard.loadDashboard()
+    // Delay reload — user sees the success card first, then NFT disappears from store
+    setTimeout(() => dashboard.loadDashboard(), 4000)
   } catch (err: any) {
     transferError.value = err?.message || err.response?.data?.error || 'Failed to transfer NFT'
   } finally {
@@ -815,7 +818,6 @@ onUnmounted(() => {
 .fee-note        { font-size: 10px; color: #aaa; }
 .fee-divider     { height: 1px; background: #ebebeb; margin: 2px 0; }
 
-/* Keep these just in case any other components bleed into this view, but the UI uses TxSuccessCard */
 .confirmed-card {
   border-radius: 12px; padding: 14px;
   display: flex; flex-direction: column; gap: 8px;
