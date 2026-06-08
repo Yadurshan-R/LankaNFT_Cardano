@@ -31,7 +31,13 @@
         target="_blank" rel="noopener noreferrer" class="btn-scan">
         <ExternalLink :size="13" /> View on Cardanoscan
       </a>
-      <button class="btn-ghost" @click="resetForm">Mint Another</button>
+      
+      <button v-if="cooldownSeconds === 0" class="btn-ghost" @click="resetForm">
+        Mint Another
+      </button>
+      <div v-else class="cooldown-notice">
+        ⏳ Wait {{ cooldownSeconds }}s for block confirmation before next mint
+      </div>
     </div>
 
     <div v-else class="form-layout">
@@ -162,6 +168,9 @@ const mintStrategy  = ref<'standard' | 'lazy'>('standard')
 const mintSuccess   = ref(false)
 const lastTxHash    = ref('')
 
+// UX Fix: Cooldown state
+const cooldownSeconds = ref(0)
+
 const metadata = reactive({
   name: '', description: '', royalties: '5', totalSupply: '1',
 })
@@ -248,6 +257,10 @@ async function handleMint() {
 
       lastTxHash.value  = txHash
       mintSuccess.value = true
+      
+      // UX Fix: Trigger the 20s cooldown on success
+      startCooldown()
+
       await dashboard.loadDashboard()
 
     } catch (err: any) {
@@ -263,7 +276,19 @@ async function handleMint() {
     if (!minted) return
     lastTxHash.value  = minted.tx_hash
     mintSuccess.value = true
+    
+    // UX Fix: Trigger the 20s cooldown on success
+    startCooldown()
   }
+}
+
+// ── UX Fix: Cooldown Logic ────────────────────────────────────────────────────
+function startCooldown() {
+  cooldownSeconds.value = 20
+  const interval = setInterval(() => {
+    cooldownSeconds.value--
+    if (cooldownSeconds.value <= 0) clearInterval(interval)
+  }, 1000)
 }
 
 function resetForm() {
@@ -445,6 +470,17 @@ function resetForm() {
   font-size: 13px; cursor: pointer; color: #666;
 }
 .btn-ghost:hover { border-color: #534AB7; color: #534AB7; }
+
+/* Cooldown notice */
+.cooldown-notice {
+  font-size: 13px;
+  color: #7a5c00;
+  background: #FFF8E1;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid #f0d080;
+  margin-top: 10px;
+}
 
 /* Spinner */
 .spin { animation: spin 0.8s linear infinite; }

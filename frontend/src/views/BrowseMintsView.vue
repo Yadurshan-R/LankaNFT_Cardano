@@ -12,7 +12,6 @@
       </div>
     </div>
 
-    <!-- ── Filter bar ── -->
     <div class="filter-bar">
       <div class="search-wrap">
         <Search :size="15" class="search-icon" />
@@ -48,7 +47,6 @@
       </div>
     </div>
 
-    <!-- ── Loading skeletons ── -->
     <div v-if="loading" class="listings-grid">
       <div v-for="n in 8" :key="n" class="listing-card listing-card--skeleton">
         <div class="sk-image" />
@@ -59,7 +57,6 @@
       </div>
     </div>
 
-    <!-- ── Empty state ── -->
     <div v-else-if="filteredListings.length === 0" class="empty-state">
       <Store :size="40" color="#ddd" />
       <p class="empty-title">
@@ -78,7 +75,6 @@
       </router-link>
     </div>
 
-    <!-- ── NFT grid ── -->
     <div v-else class="listings-grid">
       <div
         v-for="listing in filteredListings"
@@ -86,7 +82,6 @@
         class="listing-card"
         @click="selectedListing = listing"
       >
-        <!-- Image -->
         <div class="listing-img-wrap">
           <img
             v-if="imageUrl(listing.image_ipfs)"
@@ -97,7 +92,6 @@
           <div v-else class="listing-img-placeholder">
             <ImageIcon :size="28" color="#ddd" />
           </div>
-          <!-- Hover overlay -->
           <div class="listing-hover">
             <span class="hover-label">
               <Eye :size="13" /> View Details
@@ -105,7 +99,6 @@
           </div>
         </div>
 
-        <!-- Card body: name + price only -->
         <div class="listing-body">
           <p class="listing-name">{{ listing.nft_name }}</p>
           <p class="listing-price">{{ adaAmount(listing.price_lovelace) }} ₳</p>
@@ -113,12 +106,10 @@
       </div>
     </div>
 
-    <!-- Results count -->
     <div v-if="!loading && filteredListings.length > 0" class="results-count">
       {{ filteredListings.length }} of {{ listings.length }} listings
     </div>
 
-    <!-- ── OpenSea-style detail panel ── -->
     <ListingDetailPanel
       :listing="selectedListing"
       :loading="buyingId !== null"
@@ -126,51 +117,64 @@
       @close="selectedListing = null"
     />
 
-    <!-- ── Toast notifications ── -->
-    <Transition name="toast">
-      <div v-if="successMsg" class="toast toast--success">
-        <CheckCircle :size="15" /> {{ successMsg }}
-      </div>
-    </Transition>
     <Transition name="toast">
       <div v-if="errorMsg" class="toast toast--error">
         <AlertCircle :size="15" /> {{ errorMsg }}
       </div>
     </Transition>
 
+    <BuySuccessModal
+      :show="!!buySuccessData"
+      :tx-hash="buySuccessData?.txHash || ''"
+      :nft-name="buySuccessData?.nftName || ''"
+      :image-ipfs="buySuccessData?.imageIpfs"
+      :price-lovelace="buySuccessData?.priceLovelace"
+      :policy-id="buySuccessData?.policyId"
+      :asset-name="buySuccessData?.assetName"
+      @close="buySuccessData = null"
+    />
+
   </div>
 </template>
 
 <script setup lang="ts">
-// ─────────────────────────────────────────────────────────────────────────────
-// BrowseMintsView.vue
-//
-// Public NFT marketplace — shows all active listings.
-//
-// UX decisions:
-//   - Click card → opens ListingDetailPanel (OpenSea-style detail view)
-//   - Panel shows: large image, price, details tab, buy confirmation inline
-//   - Cards show: image + name + price only — no clutter
-//   - "View Details" hover label — tells user what happens on click
-//   - 2% platform fee shown transparently in the buy breakdown (in panel)
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { computed, onMounted, ref } from 'vue'
 import {
   AlertCircle, ArrowLeft, CheckCircle, Eye,
   Image as ImageIcon, Search, SlidersHorizontal,
   Store, X,
 } from 'lucide-vue-next'
-import { getAllListings, buyListing } from '@/services/listing'
+import {
+  getAllListings, buyListing,
+  buyListingUnsigned, confirmBuyListing,
+} from '@/services/listing'
+import { submitSignedTx }   from '@/services/nft'
+import { useAuthStore }     from '@/stores/auth'
+import { useWalletSession } from '@/composables/useWalletSession'
+import { useDashboardStore } from '@/stores/dashboard'
 import ListingDetailPanel from '@/components/marketplace/ListingDetailPanel.vue'
+import BuySuccessModal    from '@/components/marketplace/BuySuccessModal.vue'
 
 // ── State ─────────────────────────────────────────────────────────────────────
 const listings        = ref<any[]>([])
 const loading         = ref(true)
 const buyingId        = ref<string | null>(null)
 const selectedListing = ref<any | null>(null)
-const successMsg      = ref('')
 const errorMsg        = ref('')
+
+// Replaces the simple toast — holds all data needed for BuySuccessModal
+const buySuccessData = ref<{
+  txHash:        string
+  nftName:       string
+  imageIpfs?:    string
+  priceLovelace?: number
+  policyId?:     string
+  assetName?:    string
+} | null>(null)
+
+const auth          = useAuthStore()
+const walletSession = useWalletSession()
+const dashboard     = useDashboardStore()
 
 // Filters
 const searchQuery = ref('')
@@ -178,31 +182,24 @@ const sortBy      = ref('newest')
 const maxPrice    = ref<number | null>(null)
 
 // ── Computed ──────────────────────────────────────────────────────────────────
-
 const hasFilters = computed(() =>
   searchQuery.value.trim() !== '' || maxPrice.value !== null
 )
-
 const filteredListings = computed(() => {
   let result = [...listings.value]
-
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.toLowerCase()
     result = result.filter((l) => l.nft_name?.toLowerCase().includes(q))
   }
-
   if (maxPrice.value !== null && maxPrice.value > 0) {
     result = result.filter((l) => l.price_lovelace / 1_000_000 <= maxPrice.value!)
   }
-
   if (sortBy.value === 'price_asc')  result.sort((a, b) => a.price_lovelace - b.price_lovelace)
   if (sortBy.value === 'price_desc') result.sort((a, b) => b.price_lovelace - a.price_lovelace)
-
   return result
 })
 
 // ── Methods ───────────────────────────────────────────────────────────────────
-
 function clearFilters() {
   searchQuery.value = ''
   sortBy.value      = 'newest'
@@ -220,30 +217,55 @@ function adaAmount(lovelace: number): string {
   return (lovelace / 1_000_000).toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
-function showSuccess(msg: string) {
-  successMsg.value = msg
-  setTimeout(() => (successMsg.value = ''), 4000)
-}
-
 function showError(msg: string) {
   errorMsg.value = msg
-  setTimeout(() => (errorMsg.value = ''), 4000)
+  setTimeout(() => (errorMsg.value = ''), 5000)
 }
 
 async function handleBuy(listing: any) {
   if (!listing) return
   buyingId.value = listing.id
+
   try {
-    const result = await buyListing(listing.id)
-    showSuccess(`Purchase successful! TX: ${result.tx_hash.slice(0, 16)}...`)
-    listings.value    = listings.value.filter((l) => l.id !== listing.id)
+    let txHash: string
+
+    if (auth.walletType === 'external') {
+      // External wallet: unsigned → sign → submit → confirm
+      const unsignedRes = await buyListingUnsigned(listing.id)
+      const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
+      txHash            = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
+      await confirmBuyListing(listing.id, txHash)
+    } else {
+      // Custodial wallet: backend handles everything
+      const result = await buyListing(listing.id)
+      txHash = result.tx_hash
+    }
+
+    // Remove from listing grid
+    listings.value        = listings.value.filter((l) => l.id !== listing.id)
     selectedListing.value = null
+
+    // Show professional success modal with all details
+    buySuccessData.value = {
+      txHash,
+      nftName:       listing.nft_name,
+      imageIpfs:     listing.image_ipfs,
+      priceLovelace: listing.price_lovelace,
+      policyId:      listing.nft_policy_id,
+      assetName:     listing.nft_asset_name,
+    }
+
+    // Reload dashboard so purchased NFT appears there
+    await dashboard.loadDashboard()
+
   } catch (err: any) {
-    const raw = err.response?.data?.error || ''
+    const raw = err?.message || err.response?.data?.error || ''
     const friendly =
       raw.includes('Insufficient input') ? 'Not enough ADA in your wallet.' :
-      raw.includes('UTxO')              ? 'Transaction failed. Please try again.' :
-                                          'Purchase failed. Please try again.'
+      raw.includes('UTxO')               ? 'Transaction failed. Please try again.' :
+      raw.includes('collateral')         ? 'Wallet needs a 5 ADA collateral UTxO.' :
+      raw.includes('User declined')      ? 'Transaction cancelled.' :
+                                           'Purchase failed. Please try again.'
     showError(friendly)
   } finally {
     buyingId.value = null

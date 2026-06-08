@@ -85,6 +85,53 @@
           </router-link>
         </div>
 
+        <div v-if="nft.status === 'pending'" class="action-section">
+          <div v-if="retryMintConfirmed" class="confirmed-card confirmed-card--green">
+            <div class="confirmed-header">
+              <CheckCircle :size="16" /> Minted Successfully!
+            </div>
+            <div class="confirmed-row">
+              <span>Transaction</span>
+              <a
+                :href="`https://preprod.cardanoscan.io/transaction/${retryMintTxHash}`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="confirmed-link"
+              >
+                View on Cardanoscan →
+              </a>
+            </div>
+            <div class="confirmed-row">
+              <span>Asset</span>
+              <a
+                :href="`https://preprod.cardanoscan.io/token/${nft.policy_id}${nft.user_token_name}`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="confirmed-link"
+              >
+                View Asset →
+              </a>
+            </div>
+            <p class="confirmed-note">⚡ Confirms on-chain in ~20 seconds</p>
+          </div>
+
+          <template v-else>
+            <div class="listed-notice" style="background: #FFF8E1; color: #7a5c00; border: 1px solid #f0d080;">
+              ⏳ This NFT was prepared but not minted yet. Complete minting now.
+            </div>
+            <button
+              class="btn-primary-action"
+              :disabled="retryMinting"
+              @click="handleRetryMint"
+            >
+              <Loader2 v-if="retryMinting" :size="15" class="spin" />
+              <Sparkles v-else :size="15" />
+              {{ retryMinting ? 'Minting...' : 'Mint Now — One Click' }}
+            </button>
+            <p v-if="retryMintError" class="form-error">{{ retryMintError }}</p>
+          </template>
+        </div>
+
         <div v-if="nft.status === 'minted'" class="action-section">
           <div v-if="listingConfirmed" class="confirmed-card confirmed-card--green">
             <div class="confirmed-header"><CheckCircle :size="16" /> Listed Successfully</div>
@@ -285,57 +332,59 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   AlertCircle, ArrowLeft, Award, Check, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Copy,
   ExternalLink, Image as ImageIcon,
-  Loader2, Lock, Send, Store, Tag, X,
+  Loader2, Lock, Send, Sparkles, Store, Tag, X,
 } from 'lucide-vue-next'
 import { useDashboardStore } from '@/stores/dashboard'
-import { createListing, cancelListing } from '@/services/listing'
-import { transferNFT } from '@/services/nft'
+import { useAuthStore }      from '@/stores/auth'
+import { useWalletSession }  from '@/composables/useWalletSession'
+import {
+  createListing, cancelListing,
+  createListingUnsigned, confirmCreateListing,
+  cancelListingUnsigned, confirmCancelListing,
+} from '@/services/listing'
+import {
+  transferNFT, transferNFTUnsigned, confirmTransfer,
+  mintNFT, mintNFTUnsigned, confirmMint, submitSignedTx,
+} from '@/services/nft'
 import ListConfirmModal from '@/components/marketplace/ListConfirmModal.vue'
+import TxSuccessCard from '@/components/shared/TxSuccessCard.vue'
 
-const route     = useRoute()
-const router    = useRouter()
-const dashboard = useDashboardStore()
+const route         = useRoute()
+const router        = useRouter()
+const dashboard     = useDashboardStore()
+const auth          = useAuthStore()
+const walletSession = useWalletSession()
 
 const loading = ref(true)
 const copied  = ref<string | null>(null)
 
-// ── Navigation logic ──────────────────────────────────────────────────────────
+// ── Navigation ────────────────────────────────────────────────────────────────
 const currentIndex = computed(() =>
   dashboard.nfts.findIndex((n: any) => n.id === route.params.id)
 )
-
 const prevNFT = computed(() =>
   currentIndex.value > 0 ? dashboard.nfts[currentIndex.value - 1] : null
 )
-
 const nextNFT = computed(() =>
   currentIndex.value < dashboard.nfts.length - 1
     ? dashboard.nfts[currentIndex.value + 1]
     : null
 )
-
-function goToPrev() {
-  if (prevNFT.value) router.push(`/nft/${prevNFT.value.id}`)
-}
-
-function goToNext() {
-  if (nextNFT.value) router.push(`/nft/${nextNFT.value.id}`)
-}
-
-// Keyboard arrow key navigation
+function goToPrev() { if (prevNFT.value) router.push(`/nft/${prevNFT.value.id}`) }
+function goToNext() { if (nextNFT.value) router.push(`/nft/${nextNFT.value.id}`) }
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowLeft')  goToPrev()
   if (e.key === 'ArrowRight') goToNext()
 }
 
 // ── Listing flow ──────────────────────────────────────────────────────────────
-const showListForm    = ref(false)
-const showListConfirm = ref(false)
-const listPrice       = ref(10)
-const listing         = ref(false)
-const listError       = ref('')
+const showListForm     = ref(false)
+const showListConfirm  = ref(false)
+const listPrice        = ref(10)
+const listing          = ref(false)
+const listError        = ref('')
 const listingConfirmed = ref(false)
-const listingTxHash   = ref('')
+const listingTxHash    = ref('')
 
 // ── Cancel flow ───────────────────────────────────────────────────────────────
 const showCancelConfirm = ref(false)
@@ -352,38 +401,36 @@ const transferError     = ref('')
 const transferConfirmed = ref(false)
 const transferTxHash    = ref('')
 
+// ── Pending re-mint flow ──────────────────────────────────────────────────────
+const retryMinting      = ref(false)
+const retryMintError    = ref('')
+const retryMintConfirmed = ref(false)
+const retryMintTxHash   = ref('')
+
 // ── Computed ──────────────────────────────────────────────────────────────────
 const nft = computed(() =>
   dashboard.nfts.find((n) => n.id === route.params.id)
 )
-
 const imageUrl = computed(() => {
   if (!nft.value?.image) return null
   return nft.value.image.startsWith('ipfs://')
     ? `https://gateway.pinata.cloud/ipfs/${nft.value.image.replace('ipfs://', '')}`
     : nft.value.image
 })
-
-// IPFS button — opens the actual image/asset
 const ipfsUrl = computed(() => {
   const ipfs = nft.value?.image || nft.value?.image_ipfs
   if (!ipfs) return '#'
   return `https://gateway.pinata.cloud/ipfs/${ipfs.replace('ipfs://', '')}`
 })
-
-// Cardanoscan button — use user_token_name which is already hex-encoded
-const cardanoscanUrl = computed(() => {
-  return `https://preprod.cardanoscan.io/token/${nft.value?.policy_id}${nft.value?.user_token_name}`
-})
-
+const cardanoscanUrl = computed(() =>
+  `https://preprod.cardanoscan.io/token/${nft.value?.policy_id}${nft.value?.user_token_name}`
+)
 const formattedDate = computed(() => {
   if (!nft.value?.created_at) return '—'
   return new Date(nft.value.created_at).toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric',
   })
 })
-
-// Find the active listing for this NFT (needed for cancel)
 const activeListing = computed(() =>
   dashboard.myListings.find(
     (l: any) => l.nft_id === nft.value?.id && l.status === 'active'
@@ -397,6 +444,7 @@ async function copy(text: string, key: string) {
   setTimeout(() => (copied.value = null), 2000)
 }
 
+// ── List ──────────────────────────────────────────────────────────────────────
 async function handleList() {
   if (!nft.value) return
   if (listPrice.value < 2) {
@@ -406,59 +454,131 @@ async function handleList() {
   }
   listing.value = true
   listError.value = ''
+  const priceLovelace = Math.floor(listPrice.value * 1_000_000)
+
   try {
-    const result = await createListing(nft.value.id, Math.floor(listPrice.value * 1_000_000))
-    listingTxHash.value = result.tx_hash
-    listingConfirmed.value = true
-    showListForm.value = false
+    if (auth.walletType === 'external') {
+      const walletUtxos  = await walletSession.getUtxos()
+      const unsignedRes  = await createListingUnsigned(nft.value.id, priceLovelace)
+      const witnessCbor  = await walletSession.signOnly(unsignedRes.unsigned_cbor)
+      const txHash       = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
+      await confirmCreateListing(
+        unsignedRes.nft_id,
+        txHash,
+        unsignedRes.price_lovelace,
+        unsignedRes.nft_policy_id,
+        unsignedRes.nft_asset_name,
+        unsignedRes.royalty_policy_id,
+      )
+      listingTxHash.value    = txHash
+      listingConfirmed.value = true
+    } else {
+      const result = await createListing(nft.value.id, priceLovelace)
+      listingTxHash.value    = result.tx_hash
+      listingConfirmed.value = true
+    }
+    showListForm.value    = false
     showListConfirm.value = false
     await dashboard.loadDashboard()
   } catch (err: any) {
-    listError.value = err.response?.data?.error || 'Failed to list NFT'
+    listError.value = err?.message || err.response?.data?.error || 'Failed to list NFT'
     showListConfirm.value = false
   } finally {
     listing.value = false
   }
 }
 
+// ── Cancel ────────────────────────────────────────────────────────────────────
 async function handleCancel() {
   if (!activeListing.value) {
     cancelError.value = 'Could not find the active listing — try refreshing.'
     return
   }
-  cancelling.value = true
+  cancelling.value  = true
   cancelError.value = ''
+
   try {
-    const result = await cancelListing(activeListing.value.id)
-    cancelTxHash.value = result.tx_hash
-    cancelConfirmed.value = true
+    if (auth.walletType === 'external') {
+      const unsignedRes = await cancelListingUnsigned(activeListing.value.id)
+      const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
+      const txHash      = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
+      await confirmCancelListing(activeListing.value.id, txHash)
+      cancelTxHash.value    = txHash
+      cancelConfirmed.value = true
+    } else {
+      const result = await cancelListing(activeListing.value.id)
+      cancelTxHash.value    = result.tx_hash
+      cancelConfirmed.value = true
+    }
     showCancelConfirm.value = false
     await dashboard.loadDashboard()
   } catch (err: any) {
-    cancelError.value = err.response?.data?.error || 'Failed to cancel listing'
+    cancelError.value = err?.message || err.response?.data?.error || 'Failed to cancel listing'
   } finally {
     cancelling.value = false
   }
 }
 
+// ── Transfer ──────────────────────────────────────────────────────────────────
 async function handleTransfer() {
   if (!nft.value) return
   if (!transferAddress.value.startsWith('addr')) {
     transferError.value = 'Enter a valid Cardano address starting with addr'
     return
   }
-  transferring.value = true
+  transferring.value  = true
   transferError.value = ''
+
   try {
-    const result = await transferNFT(nft.value.id, transferAddress.value)
-    transferTxHash.value = result.tx_hash
-    transferConfirmed.value = true
+    if (auth.walletType === 'external') {
+      const unsignedRes = await transferNFTUnsigned(nft.value.id, transferAddress.value)
+      const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
+      const txHash      = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
+      await confirmTransfer(nft.value.id, txHash, transferAddress.value)
+      transferTxHash.value    = txHash
+      transferConfirmed.value = true
+    } else {
+      const result = await transferNFT(nft.value.id, transferAddress.value)
+      transferTxHash.value    = result.tx_hash
+      transferConfirmed.value = true
+    }
     showTransferForm.value = false
     await dashboard.loadDashboard()
   } catch (err: any) {
-    transferError.value = err.response?.data?.error || 'Failed to transfer NFT'
+    transferError.value = err?.message || err.response?.data?.error || 'Failed to transfer NFT'
   } finally {
     transferring.value = false
+  }
+}
+
+// ── Pending re-mint ───────────────────────────────────────────────────────────
+// NFT is already in DB (prepare-mint ran). Just mint it — no IPFS upload needed.
+async function handleRetryMint() {
+  if (!nft.value) return
+  retryMinting.value   = true
+  retryMintError.value = ''
+
+  try {
+    if (auth.walletType === 'external') {
+      const walletUtxos = await walletSession.getUtxos()
+      // mintNFTUnsigned accepts wallet_utxos — backend fetches NFT data from DB
+      const unsignedRes = await mintNFTUnsigned(nft.value.id, walletUtxos)
+      const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
+      const txHash      = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
+      await confirmMint(nft.value.id, txHash, unsignedRes.policy_id)
+      retryMintTxHash.value    = txHash
+      retryMintConfirmed.value = true
+    } else {
+      // Custodial: call /api/nft/mint directly (backend has mnemonic)
+      const result = await mintNFT(nft.value.id)
+      retryMintTxHash.value    = result.tx_hash
+      retryMintConfirmed.value = true
+    }
+    await dashboard.loadDashboard()
+  } catch (err: any) {
+    retryMintError.value = err?.message || err.response?.data?.error || 'Minting failed. Please try again.'
+  } finally {
+    retryMinting.value = false
   }
 }
 
@@ -467,7 +587,6 @@ onMounted(async () => {
   loading.value = false
   window.addEventListener('keydown', handleKeydown)
 })
-
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown)
 })
