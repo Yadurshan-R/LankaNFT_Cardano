@@ -162,7 +162,6 @@ const buyingId        = ref<string | null>(null)
 const selectedListing = ref<any | null>(null)
 const errorMsg        = ref('')
 
-// Replaces the simple toast — holds all data needed for BuySuccessModal
 const buySuccessData = ref<{
   txHash:        string
   nftName:       string
@@ -230,22 +229,18 @@ async function handleBuy(listing: any) {
     let txHash: string
 
     if (auth.walletType === 'external') {
-      // External wallet: unsigned → sign → submit → confirm
       const unsignedRes = await buyListingUnsigned(listing.id)
       const witnessCbor = await walletSession.signOnly(unsignedRes.unsigned_cbor)
       txHash            = await submitSignedTx(unsignedRes.unsigned_cbor, witnessCbor)
       await confirmBuyListing(listing.id, txHash)
     } else {
-      // Custodial wallet: backend handles everything
       const result = await buyListing(listing.id)
       txHash = result.tx_hash
     }
 
-    // Remove from listing grid
     listings.value        = listings.value.filter((l) => l.id !== listing.id)
     selectedListing.value = null
 
-    // Show professional success modal with all details
     buySuccessData.value = {
       txHash,
       nftName:       listing.nft_name,
@@ -255,7 +250,6 @@ async function handleBuy(listing: any) {
       assetName:     listing.nft_asset_name,
     }
 
-    // Reload dashboard so purchased NFT appears there
     await dashboard.loadDashboard()
 
   } catch (err: any) {
@@ -367,10 +361,11 @@ onMounted(async () => {
 }
 .listing-img {
   width: 100%; height: 100%;
-  object-fit: cover; display: block;
-  transition: transform 0.3s ease;
+  object-fit: contain; display: block;
+  background: #f8f8f8;
+  transition: transform 0.2s ease;
 }
-.listing-card:hover .listing-img { transform: scale(1.04); }
+.listing-card:hover .listing-img { transform: scale(1.02); }
 .listing-img-placeholder {
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;

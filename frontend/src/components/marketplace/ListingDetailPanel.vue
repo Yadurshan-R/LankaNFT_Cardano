@@ -158,6 +158,17 @@
                   <span class="detail-label">Royalties</span>
                   <span class="detail-value">{{ listing.royalties ?? 5 }}% on every resale</span>
                 </div>
+                <div class="detail-row">
+                  <span class="detail-label">View Asset</span>
+                  <a
+                    :href="cardanoscanTokenUrl(listing.nft_policy_id, listing.nft_asset_name)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="detail-link"
+                  >
+                    Cardanoscan ↗
+                  </a>
+                </div>
               </div>
 
               <div v-if="activeTab === 'Activity'" class="tab-content">
@@ -199,6 +210,7 @@ import {
   AlertCircle, Check, Copy, Image as ImageIcon,
   Loader2, ShoppingCart, ShieldCheck, Tag, X,
 } from 'lucide-vue-next'
+import { cardanoscanTokenUrl, cardanoscanTxUrl } from '@/utils/cardano'
 
 // ── Props & emits ─────────────────────────────────────────────────────────────
 const props = defineProps<{
@@ -343,7 +355,8 @@ function onClose()   {
 }
 .panel-img {
   width: 100%; height: 100%;
-  object-fit: cover; display: block;
+  object-fit: contain; display: block;
+  background: #f8f8f8;
 }
 .panel-img-placeholder {
   width: 100%; height: 100%;
@@ -510,6 +523,12 @@ function onClose()   {
   opacity: 0.7; transition: opacity 0.15s;
 }
 .copy-btn:hover { opacity: 1; }
+
+.detail-link {
+  font-size: 12px; font-weight: 500;
+  color: #534AB7; text-decoration: none;
+}
+.detail-link:hover { text-decoration: underline; }
 
 /* Activity tab */
 .activity-item {

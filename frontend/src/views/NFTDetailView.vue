@@ -93,18 +93,18 @@
             <div class="confirmed-row">
               <span>Transaction</span>
               <a
-                :href="`https://preprod.cardanoscan.io/transaction/${retryMintTxHash}`"
+                :href="cardanoscanTxUrl(retryMintTxHash)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="confirmed-link"
               >
-                View on Cardanoscan →
+                View →
               </a>
             </div>
             <div class="confirmed-row">
               <span>Asset</span>
               <a
-                :href="`https://preprod.cardanoscan.io/token/${nft.policy_id}${nft.user_token_name}`"
+                :href="cardanoscanTokenUrl(nft.policy_id, nft.user_token_name)"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="confirmed-link"
@@ -140,7 +140,7 @@
             </div>
             <div class="confirmed-row">
               <span>Transaction</span>
-              <a :href="`https://preprod.cardanoscan.io/transaction/${listingTxHash}`"
+              <a :href="cardanoscanTxUrl(listingTxHash)"
                 target="_blank" rel="noopener noreferrer" class="confirmed-link">View →</a>
             </div>
             <p class="confirmed-note">Your NFT is now visible in Browse Mints.</p>
@@ -170,7 +170,7 @@
             <div class="confirmed-header"><CheckCircle :size="16" /> Listing Cancelled</div>
             <div class="confirmed-row">
               <span>Transaction</span>
-              <a :href="`https://preprod.cardanoscan.io/transaction/${cancelTxHash}`"
+              <a :href="cardanoscanTxUrl(cancelTxHash)"
                 target="_blank" rel="noopener noreferrer" class="confirmed-link">View →</a>
             </div>
             <p class="confirmed-note">Your NFT has been returned to your wallet.</p>
@@ -214,7 +214,7 @@
             </div>
             <div class="confirmed-row">
               <span>Transaction</span>
-              <a :href="`https://preprod.cardanoscan.io/transaction/${transferTxHash}`"
+              <a :href="cardanoscanTxUrl(transferTxHash)"
                 target="_blank" rel="noopener noreferrer" class="confirmed-link">View →</a>
             </div>
             <p class="confirmed-note">This NFT has been removed from your dashboard.</p>
@@ -337,6 +337,7 @@ import {
 import { useDashboardStore } from '@/stores/dashboard'
 import { useAuthStore }      from '@/stores/auth'
 import { useWalletSession }  from '@/composables/useWalletSession'
+import { cardanoscanTokenUrl, cardanoscanTxUrl } from '@/utils/cardano'
 import {
   createListing, cancelListing,
   createListingUnsigned, confirmCreateListing,
@@ -422,9 +423,10 @@ const ipfsUrl = computed(() => {
   if (!ipfs) return '#'
   return `https://gateway.pinata.cloud/ipfs/${ipfs.replace('ipfs://', '')}`
 })
-const cardanoscanUrl = computed(() =>
-  `https://preprod.cardanoscan.io/token/${nft.value?.policy_id}${nft.value?.user_token_name}`
-)
+const cardanoscanUrl = computed(() => {
+  if (!nft.value?.policy_id || !nft.value?.user_token_name) return '#'
+  return cardanoscanTokenUrl(nft.value.policy_id, nft.value.user_token_name)
+})
 const formattedDate = computed(() => {
   if (!nft.value?.created_at) return '—'
   return new Date(nft.value.created_at).toLocaleDateString('en-US', {

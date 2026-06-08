@@ -28,7 +28,7 @@
 
     <div class="tx-success-links">
       <a
-        :href="`https://preprod.cardanoscan.io/transaction/${txHash}`"
+        :href="cardanoscanTxUrl(txHash)"
         target="_blank"
         rel="noopener noreferrer"
         class="tx-link"
@@ -37,7 +37,7 @@
       </a>
       <a
         v-if="policyId && assetName"
-        :href="`https://preprod.cardanoscan.io/token/${policyId}${assetName}`"
+        :href="cardanoscanTokenUrl(policyId, assetName)"
         target="_blank"
         rel="noopener noreferrer"
         class="tx-link"
@@ -53,6 +53,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { Check, CheckCircle, Copy, ExternalLink } from 'lucide-vue-next'
+import { cardanoscanTokenUrl, cardanoscanTxUrl } from '@/utils/cardano'
 
 const props = defineProps<{
   title:     string

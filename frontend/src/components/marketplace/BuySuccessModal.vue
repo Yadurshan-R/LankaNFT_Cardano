@@ -4,12 +4,10 @@
       <div v-if="show" class="modal-overlay" @click.self="emit('close')">
         <div class="modal" role="dialog" aria-modal="true">
 
-          <!-- Close -->
           <button class="modal-close" @click="emit('close')">
             <X :size="18" />
           </button>
 
-          <!-- Success icon -->
           <div class="success-icon-wrap">
             <CheckCircle :size="44" color="#085041" />
           </div>
@@ -17,16 +15,23 @@
           <h2 class="modal-title">Purchase Confirmed!</h2>
           <p class="modal-sub">Your NFT has been submitted to the Cardano blockchain.</p>
 
-          <!-- NFT info -->
           <div class="nft-row">
-            <img v-if="imageUrl" :src="imageUrl" :alt="nftName" class="nft-thumb" />
+            <img
+              v-if="imageUrl && !imgError"
+              :src="imageUrl"
+              :alt="nftName"
+              class="nft-thumb"
+              @error="imgError = true"
+            />
+            <div v-else class="nft-thumb-placeholder">
+              <ImageIcon :size="22" color="#ccc" />
+            </div>
             <div class="nft-info">
               <p class="nft-name">{{ nftName }}</p>
               <p class="nft-price">{{ adaAmount }} ₳</p>
             </div>
           </div>
 
-          <!-- Tx details -->
           <div class="detail-card">
             <div class="detail-row">
               <span class="detail-label">Transaction</span>
@@ -48,16 +53,14 @@
             </div>
           </div>
 
-          <!-- Confirmation notice -->
           <div class="confirm-notice">
             <span class="confirm-dot" />
             Usually confirms on-chain within ~20 seconds
           </div>
 
-          <!-- Action buttons -->
           <div class="modal-actions">
             <a
-              :href="`https://preprod.cardanoscan.io/transaction/${txHash}`"
+              :href="cardanoscanTxUrl(txHash)"
               target="_blank"
               rel="noopener noreferrer"
               class="btn-scan"
@@ -66,7 +69,7 @@
             </a>
             <a
               v-if="policyId && assetName"
-              :href="`https://preprod.cardanoscan.io/token/${policyId}${assetName}`"
+              :href="cardanoscanTokenUrl(policyId, assetName)"
               target="_blank"
               rel="noopener noreferrer"
               class="btn-scan btn-scan--secondary"
@@ -87,7 +90,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Check, CheckCircle, Copy, ExternalLink, X } from 'lucide-vue-next'
+import { Check, CheckCircle, Copy, ExternalLink, X, Image as ImageIcon } from 'lucide-vue-next'
+import { cardanoscanTokenUrl, cardanoscanTxUrl } from '@/utils/cardano'
 
 const props = defineProps<{
   show:       boolean
@@ -102,6 +106,7 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const copied = ref(false)
+const imgError = ref(false)
 
 const imageUrl = computed(() => {
   if (!props.imageIpfs) return null
@@ -178,6 +183,12 @@ async function copyHash() {
   width: 52px; height: 52px;
   border-radius: 8px; object-fit: cover;
   background: #f0f0f0; flex-shrink: 0;
+}
+.nft-thumb-placeholder {
+  width: 52px; height: 52px;
+  border-radius: 8px; background: #f0f0f0;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
 }
 .nft-info   { text-align: left; }
 .nft-name   { font-size: 14px; font-weight: 600; color: #111; margin: 0 0 3px; }
