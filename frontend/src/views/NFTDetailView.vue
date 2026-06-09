@@ -550,15 +550,25 @@ async function handleTransfer() {
       
       transferTxHash.value    = txHash
       transferConfirmed.value = true
+      showTransferForm.value  = false
+
+      // Show success for 3 seconds, then reload dashboard and navigate home
+      setTimeout(async () => {
+        await dashboard.loadDashboard()
+        router.push('/')
+      }, 3000)
     } else {
       const result = await transferNFT(nft.value.id, transferAddress.value)
-      
       transferTxHash.value    = result.tx_hash
       transferConfirmed.value = true
+      showTransferForm.value  = false
+      
+      // SAME 3 second delay then go to dashboard
+      setTimeout(async () => {
+        await dashboard.loadDashboard()
+        router.push('/')
+      }, 3000)
     }
-    showTransferForm.value = false
-    // Delay reload — user sees the success card first, then NFT disappears from store
-    setTimeout(() => dashboard.loadDashboard(), 4000)
   } catch (err: any) {
     transferError.value = err?.message || err.response?.data?.error || 'Failed to transfer NFT'
   } finally {
