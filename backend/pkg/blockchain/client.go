@@ -281,6 +281,42 @@ func (c *Client) MintNFTUnsigned(req MintNFTUnsignedRequest) (*MintNFTUnsignedRe
 	return &result, nil
 }
 
+// ─── Unsigned Batch Mint ──────────────────────────────────────────────────────
+
+type BatchMintUnsignedRequest struct {
+	WalletAddress string          `json:"wallet_address"`
+	WalletUtxos   []string        `json:"wallet_utxos"`
+	Items         []BatchMintItem `json:"items"`
+}
+
+type BatchMintUnsignedToken struct {
+	NFTID     string `json:"nft_id"`
+	AssetName string `json:"asset_name"`
+	RefToken  string `json:"ref_token"`
+	UserToken string `json:"user_token"`
+}
+
+type BatchMintUnsignedResponse struct {
+	UnsignedCbor string                   `json:"unsigned_cbor"`
+	PolicyID     string                   `json:"policy_id"`
+	LockSlot     int64                    `json:"lock_slot"`
+	Minted       int                      `json:"minted"`
+	Tokens       []BatchMintUnsignedToken `json:"tokens"`
+}
+
+func (c *Client) BatchMintUnsigned(req BatchMintUnsignedRequest) (*BatchMintUnsignedResponse, error) {
+	resp, err := c.post("/api/mint/batch-unsigned", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result BatchMintUnsignedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode batch unsigned response: %w", err)
+	}
+	return &result, nil
+}
+
 // ─── Unsigned List ────────────────────────────────────────────────────────────
 
 type ListNFTUnsignedRequest struct {

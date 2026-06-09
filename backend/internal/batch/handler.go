@@ -4,14 +4,11 @@
 // Batch Minting HTTP Handler
 //
 // Routes:
-//   POST /api/batch/prepare  — upload all files to IPFS, create batch job
-//   POST /api/batch/mint     — mint ALL NFTs in ONE transaction (native script)
-//   GET  /api/batch/:id      — get batch job status and progress
-//
-// Architecture:
-//   Old approach: one tx per NFT (Plutus one-shot) — slow, UTxO conflicts
-//   New approach: ALL NFTs in ONE tx (native script collection policy)
-//                 Same as NMKR, jpg.store, and all major Cardano platforms
+//   POST /api/batch/prepare       — upload all files to IPFS, create batch job
+//   POST /api/batch/mint          — mint ALL NFTs in ONE transaction (custodial)
+//   POST /api/batch/mint-unsigned — build unsigned batch transaction (external wallet)
+//   POST /api/batch/confirm       — confirm completed batch after frontend submission
+//   GET  /api/batch/:id           — get batch job status and progress
 // ─────────────────────────────────────────────────────────────────────────────
 
 package batch
@@ -47,6 +44,8 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 	{
 		b.POST("/prepare", h.PrepareBatch)
 		b.POST("/mint", h.MintBatch)
+		b.POST("/mint-unsigned", h.MintBatchUnsigned)
+		b.POST("/confirm", h.ConfirmBatch)
 		b.GET("/:id", h.GetBatchStatus)
 	}
 }
@@ -56,15 +55,6 @@ func (h *Handler) RegisterRoutes(protected *gin.RouterGroup) {
 // Accepts multiple files + metadata, uploads all to IPFS
 // Creates a batch job and stores all NFT records in DB
 // Returns batch_id for use in /api/batch/mint
-//
-// Form fields:
-//
-//	privacy          string   — 'public' or 'private'
-//	files[]          []File   — image files (one per NFT)
-//	names[]          []string — NFT names
-//	descriptions[]   []string — NFT descriptions
-//	royalties[]      []string — royalty percentages
-//	total_supplies[] []string — total supplies
 func (h *Handler) PrepareBatch(c *gin.Context) {
 	userID := c.GetString("user_id")
 
@@ -217,10 +207,7 @@ func (h *Handler) PrepareBatch(c *gin.Context) {
 
 // MintBatch godoc
 // POST /api/batch/mint
-// Mints ALL uploaded NFTs in ONE Cardano transaction
-// Uses native script collection policy — all NFTs share one policy ID
-// This is how NMKR handles batch collections — no UTxO conflicts, instant
-// Body: { "batch_id": "uuid" }
+// Mints ALL uploaded NFTs in ONE Cardano transaction using custodial keys
 func (h *Handler) MintBatch(c *gin.Context) {
 	userID := c.GetString("user_id")
 
@@ -275,8 +262,7 @@ func (h *Handler) MintBatch(c *gin.Context) {
 		return
 	}
 
-	// Validate asset name lengths — Cardano enforces 32 byte max on token names
-	// CIP-68 prefix takes 4 bytes, leaving 28 bytes for the asset name
+	// Validate asset name lengths (28 byte max with CIP-68 layout)
 	for _, item := range mintItems {
 		if len(item.AssetName) > 28 {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -298,8 +284,7 @@ func (h *Handler) MintBatch(c *gin.Context) {
 
 	log.Printf("Batch %s: minting %d NFTs in one transaction...", body.BatchID, len(mintItems))
 
-	// Call blockchain sidecar — ALL NFTs minted in ONE transaction
-	// Native script policy — no UTxO conflicts, no waiting between mints
+	// Call blockchain sidecar
 	mintResult, err := h.service.blockchainClient.BatchMintNFTs(blockchain.BatchMintRequest{
 		Mnemonic: mnemonic,
 		Items:    mintItems,
@@ -307,7 +292,6 @@ func (h *Handler) MintBatch(c *gin.Context) {
 	if err != nil {
 		log.Printf("Batch %s: mint failed: %v", body.BatchID, err)
 
-		// Mark all items as failed
 		h.service.db.Exec(c.Request.Context(), `
 			UPDATE batch_items SET status = 'failed', error_msg = $1
 			WHERE batch_id = $2
@@ -327,7 +311,7 @@ func (h *Handler) MintBatch(c *gin.Context) {
 		return
 	}
 
-	// Update all NFTs in DB with the shared tx hash and policy ID
+	// Update all NFTs in DB with shared tx hash and policy ID
 	for _, token := range mintResult.Tokens {
 		h.service.db.Exec(c.Request.Context(), `
 			UPDATE nfts
@@ -351,18 +335,129 @@ func (h *Handler) MintBatch(c *gin.Context) {
 	log.Printf("Batch %s: ✅ %d NFTs minted — tx: %s", body.BatchID, mintResult.Minted, mintResult.TxHash)
 
 	c.JSON(http.StatusOK, gin.H{
-		"batch_id":  body.BatchID,
-		"status":    "completed",
-		"total":     len(mintItems),
-		"minted":    mintResult.Minted,
-		"failed":    0,
-		"tx_hash":   mintResult.TxHash,
-		"policy_id": mintResult.PolicyID,
-		"cardanoscan": fmt.Sprintf(
-			"https://preprod.cardanoscan.io/transaction/%s",
-			mintResult.TxHash,
-		),
-		"message": fmt.Sprintf("%d NFTs minted in one transaction", mintResult.Minted),
+		"batch_id":    body.BatchID,
+		"status":      "completed",
+		"total":       len(mintItems),
+		"minted":      mintResult.Minted,
+		"failed":      0,
+		"tx_hash":     mintResult.TxHash,
+		"policy_id":   mintResult.PolicyID,
+		"cardanoscan": fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", mintResult.TxHash),
+		"message":     fmt.Sprintf("%d NFTs minted in one transaction", mintResult.Minted),
+	})
+}
+
+// MintBatchUnsigned godoc
+// POST /api/batch/mint-unsigned
+// Body: { batch_id, wallet_utxos }
+func (h *Handler) MintBatchUnsigned(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var body struct {
+		BatchID     string   `json:"batch_id" binding:"required"`
+		WalletUtxos []string `json:"wallet_utxos"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Get external wallet address
+	var walletAddress string
+	err := h.service.db.QueryRow(c.Request.Context(),
+		"SELECT wallet_address FROM external_wallets WHERE user_id = $1", userID,
+	).Scan(&walletAddress)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "external wallet not found"})
+		return
+	}
+
+	// Get all pending NFTs in this batch
+	rows, err := h.service.db.Query(c.Request.Context(), `
+		SELECT n.id, n.asset_name, n.metadata_ipfs, n.image_ipfs, n.royalties
+		FROM nfts n
+		JOIN batch_items bi ON bi.nft_id = n.id
+		WHERE bi.batch_id = $1 AND n.owner_id = $2 AND n.status = 'pending'
+		ORDER BY bi.row_order ASC
+	`, body.BatchID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch batch items"})
+		return
+	}
+	defer rows.Close()
+
+	var mintItems []blockchain.BatchMintItem
+	for rows.Next() {
+		var item blockchain.BatchMintItem
+		if err := rows.Scan(&item.NFTID, &item.AssetName, &item.MetadataIPFS, &item.ImageIPFS, &item.Royalties); err != nil {
+			continue
+		}
+		mintItems = append(mintItems, item)
+	}
+	rows.Close()
+
+	if len(mintItems) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no pending NFTs found in this batch"})
+		return
+	}
+
+	result, err := h.service.blockchainClient.BatchMintUnsigned(blockchain.BatchMintUnsignedRequest{
+		WalletAddress: walletAddress,
+		WalletUtxos:   body.WalletUtxos,
+		Items:         mintItems,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build batch tx: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"unsigned_cbor": result.UnsignedCbor,
+		"policy_id":     result.PolicyID,
+		"lock_slot":     result.LockSlot,
+		"batch_id":      body.BatchID,
+		"tokens":        result.Tokens,
+	})
+}
+
+// ConfirmBatch godoc
+// POST /api/batch/confirm
+// Called after external wallet signs and submits the batch tx.
+// Body: { batch_id, tx_hash, policy_id, tokens }
+func (h *Handler) ConfirmBatch(c *gin.Context) {
+	var body struct {
+		BatchID  string `json:"batch_id" binding:"required"`
+		TxHash   string `json:"tx_hash" binding:"required"`
+		PolicyID string `json:"policy_id" binding:"required"`
+		Tokens   []struct {
+			NFTID string `json:"nft_id"`
+		} `json:"tokens"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update all NFTs in batch
+	for _, token := range body.Tokens {
+		h.service.db.Exec(c.Request.Context(), `
+			UPDATE nfts SET status = 'minted', tx_hash = $1, policy_id = $2, updated_at = NOW()
+			WHERE id = $3
+		`, body.TxHash, body.PolicyID, token.NFTID)
+		h.service.db.Exec(c.Request.Context(), `
+			UPDATE batch_items SET status = 'minted' WHERE batch_id = $1 AND nft_id = $2
+		`, body.BatchID, token.NFTID)
+	}
+
+	// Mark batch as complete
+	h.service.db.Exec(c.Request.Context(), `
+		UPDATE batch_jobs SET minted = $1, status = 'completed', updated_at = NOW() WHERE id = $2
+	`, len(body.Tokens), body.BatchID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "batch confirmed",
+		"tx_hash": "tx_hash",
+		"minted":  len(body.Tokens),
 	})
 }
 
@@ -375,7 +470,7 @@ func (h *Handler) GetBatchStatus(c *gin.Context) {
 
 	status, err := h.service.GetBatchStatus(c.Request.Context(), batchID, userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "batch job not found"})
+		c.Status(http.StatusNotFound)
 		return
 	}
 

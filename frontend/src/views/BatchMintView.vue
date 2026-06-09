@@ -219,8 +219,18 @@ import { useBatchStore } from '@/stores/batch'
 import BatchTable from '@/components/mint/BatchTable.vue'
 import type { BatchRow } from '@/components/mint/BatchTable.vue'
 
-const batch   = useBatchStore()
+import { useAuthStore }      from '@/stores/auth'
+import { useWalletSession }  from '@/composables/useWalletSession'
+import { useDashboardStore } from '@/stores/dashboard'
+import { submitSignedTx }    from '@/services/nft'
+import api from '@/services/api'
+
+const batch    = useBatchStore()
 const tableRef = ref<InstanceType<typeof BatchTable> | null>(null)
+
+const auth          = useAuthStore()
+const walletSession = useWalletSession()
+const dashboard     = useDashboardStore()
 
 const currentStep    = ref(0)
 const privacy        = ref<'public' | 'private'>('public')
@@ -318,20 +328,59 @@ async function retryPrepare() {
   await runPrepare()
 }
 
-/**
- * Mints all prepared NFTs in one Cardano transaction.
- * Moves to minting step (step index 2) while transaction is in progress.
- */
 async function handleMint() {
   if (!batch.batchId) return
   currentStep.value = 2
-  const result = await batch.mint(batch.batchId)
-  if (result) {
-    mintedTxHash.value = result.tx_hash || ''
-    currentStep.value = 3
+
+  if (auth.walletType === 'external') {
+    // External wallet: unsigned → sign → submit → confirm
+    try {
+      batch.isLoading = true
+
+      // Get UTxOs from Lace (HD wallet — all addresses)
+      const walletUtxos = await walletSession.getUtxos()
+
+      // Build unsigned batch tx in sidecar
+      const unsignedRes = await api.post('/api/batch/mint-unsigned', {
+        batch_id:     batch.batchId,
+        wallet_utxos: walletUtxos,
+      })
+      const { unsigned_cbor, policy_id, tokens } = unsignedRes.data
+
+      // Lace signs (native script — wallet adds its key witness)
+      const witnessCbor = await walletSession.signOnly(unsigned_cbor)
+
+      // Backend assembles full tx + submits via Blockfrost
+      const txHash = await submitSignedTx(unsigned_cbor, witnessCbor)
+
+      // Confirm in DB — mark all NFTs as minted
+      await api.post('/api/batch/confirm', {
+        batch_id:  batch.batchId,
+        tx_hash:   txHash,
+        policy_id: policy_id,
+        tokens:    tokens,
+      })
+
+      mintedTxHash.value = txHash
+      currentStep.value  = 3
+
+      await dashboard.loadDashboard()
+
+    } catch (err: any) {
+      batch.error = err?.message || 'Batch mint failed. Please try again.'
+      currentStep.value = 1
+    } finally {
+      batch.isLoading = false
+    }
   } else {
-    // Mint failed — go back to preview so user can retry
-    currentStep.value = 1
+    // Custodial wallet — existing flow unchanged
+    const result = await batch.mint(batch.batchId)
+    if (result) {
+      mintedTxHash.value = result.tx_hash || ''
+      currentStep.value = 3
+    } else {
+      currentStep.value = 1
+    }
   }
 }
 
