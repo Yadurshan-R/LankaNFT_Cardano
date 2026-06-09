@@ -162,7 +162,19 @@ router.post("/batch", async (req: Request, res: Response) => {
       });
     }
 
+    // CIP-25 metadata for the entire collection
+    const cip25Metadata: Record<string, any> = { [policyId]: {} }
+    for (const item of items) {
+      cip25Metadata[policyId][item.asset_name] = {
+        name:        item.asset_name,
+        image:       item.image_ipfs,
+        mediaType:   "image/png",
+        description: "",
+      }
+    }
+
     const unsignedTx = await txBuilder
+      .metadataValue("721", cip25Metadata)
       .changeAddress(creatorAddress)
       .selectUtxosFrom(utxos)
       .invalidHereafter(lockSlot)
@@ -338,7 +350,19 @@ router.post("/batch-unsigned", async (req: Request, res: Response) => {
       });
     }
 
+    // CIP-25 metadata for the entire collection
+    const cip25Metadata: Record<string, any> = { [policyId]: {} }
+    for (const item of items) {
+      cip25Metadata[policyId][item.asset_name] = {
+        name:        item.asset_name,
+        image:       item.image_ipfs,
+        mediaType:   "image/png",
+        description: "",
+      }
+    }
+
     const unsignedTx = await txBuilder
+      .metadataValue("721", cip25Metadata)
       .changeAddress(wallet_address)
       .selectUtxosFrom(utxos)
       .invalidHereafter(lockSlot)

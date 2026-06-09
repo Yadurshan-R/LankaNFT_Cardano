@@ -201,6 +201,17 @@ router.post("/single", async (req: Request, res: Response) => {
       .txOutInlineDatumValue(cip68DatumCbor, "CBOR")
       .txOut(royaltyLockAddress, [{ unit: policyId + royaltyTokenName, quantity: "1" }])
       .txOutInlineDatumValue(royaltyDatumCbor, "CBOR")
+      // CIP-25 metadata — makes NFT images visible in all wallets (Lace, Nami, Eternl)
+      .metadataValue("721", {
+        [policyId]: {
+          [asset_name]: {
+            name:        asset_name,
+            image:       image_ipfs,
+            mediaType:   "image/png",
+            description: "",
+          }
+        }
+      })
       .changeAddress(creatorAddress)
       .selectUtxosFrom(utxos)
       .txInCollateral(collateralUtxo.input.txHash, collateralUtxo.input.outputIndex)
@@ -328,6 +339,17 @@ router.post("/single-unsigned", async (req: Request, res: Response) => {
       .txOutInlineDatumValue(cip68DatumCbor, "CBOR")
       .txOut(royaltyLockAddress, [{ unit: policyId + royaltyTokenName, quantity: "1" }])
       .txOutInlineDatumValue(royaltyDatumCbor, "CBOR")
+      // CIP-25 metadata — makes NFT images visible in all wallets (Lace, Nami, Eternl)
+      .metadataValue("721", {
+        [policyId]: {
+          [asset_name]: {
+            name:        asset_name,
+            image:       image_ipfs,
+            mediaType:   "image/png",
+            description: "",
+          }
+        }
+      })
       .changeAddress(wallet_address)
       .selectUtxosFrom(utxos)
       .txInCollateral(collateralUtxo.input.txHash, collateralUtxo.input.outputIndex)
