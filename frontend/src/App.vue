@@ -1,8 +1,6 @@
 <template>
   <div id="app">
 
-    <!-- Backend down banner — shown when health check fails -->
-    <!-- Sits above everything, doesn't block navigation -->
     <div v-if="!isBackendUp" class="maintenance-banner">
       <AlertCircle :size="14" />
       LankaNFT is temporarily unavailable. Please wait a moment.
@@ -11,14 +9,12 @@
       </button>
     </div>
 
-    <!-- Auth page — full screen, no sidebar -->
     <template v-if="isAuthPage">
       <ErrorBoundary>
         <router-view />
       </ErrorBoundary>
     </template>
 
-    <!-- All other pages — sidebar + main content -->
     <template v-else>
       <div class="app-layout">
         <AppSidebar />
@@ -85,7 +81,7 @@ a { text-decoration: none; color: inherit; }
 
 .main-content {
   flex: 1;
-  margin-left: 64px;
+  margin-left: 72px;
   min-height: 100vh;
   background: #f8f8f8;
   transition: margin-left 0.2s ease;

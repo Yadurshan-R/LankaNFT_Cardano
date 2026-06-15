@@ -13,15 +13,15 @@
     <div class="sidebar-divider" />
 
     <nav class="sidebar-nav">
-      <router-link to="/"      exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="20" /><span class="sidebar-label">Dashboard</span></router-link>
-      <router-link to="/mint"   active-class="sidebar-item--active"       class="sidebar-item"><Sparkles         :size="20" /><span class="sidebar-label">Create Mint</span></router-link>
-      <router-link to="/browse" active-class="sidebar-item--active"       class="sidebar-item"><LayoutGrid       :size="20" /><span class="sidebar-label">Browse Mints</span></router-link>
+      <router-link to="/"      exact-active-class="sidebar-item--active" class="sidebar-item"><LayoutDashboard :size="22" /><span class="sidebar-label">Dashboard</span></router-link>
+      <router-link to="/mint"   active-class="sidebar-item--active"       class="sidebar-item"><Sparkles         :size="22" /><span class="sidebar-label">Create Mint</span></router-link>
+      <router-link to="/browse" active-class="sidebar-item--active"       class="sidebar-item"><LayoutGrid       :size="22" /><span class="sidebar-label">Browse Mints</span></router-link>
     </nav>
 
     <div class="sidebar-divider" />
 
     <nav class="sidebar-nav">
-      <router-link to="/activity" active-class="sidebar-item--active" class="sidebar-item"><Activity :size="20" /><span class="sidebar-label">Activity</span></router-link>
+      <router-link to="/activity" active-class="sidebar-item--active" class="sidebar-item"><Activity :size="22" /><span class="sidebar-label">Activity</span></router-link>
     </nav>
 
     <div class="sidebar-bottom">
@@ -32,7 +32,7 @@
         :class="{ 'sidebar-item--active': isWalletOpen }"
         @click.stop="isWalletOpen = !isWalletOpen"
       >
-        <Wallet :size="20" />
+        <Wallet :size="22" />
         <span class="sidebar-label">Wallet</span>
       </button>
 
@@ -44,10 +44,10 @@
         @close="isWalletOpen = false"
       />
 
-      <router-link to="/settings" active-class="sidebar-item--active" class="sidebar-item"><Settings :size="20" /><span class="sidebar-label">Settings</span></router-link>
+      <router-link to="/settings" active-class="sidebar-item--active" class="sidebar-item"><Settings :size="22" /><span class="sidebar-label">Settings</span></router-link>
 
       <button class="sidebar-item sidebar-item--btn sidebar-item--logout" @click="handleLogout">
-        <LogOut :size="20" />
+        <LogOut :size="22" />
         <span class="sidebar-label">Logout</span>
       </button>
     </div>
@@ -92,7 +92,7 @@ async function handleLogout() {
 
 <style scoped>
 .sidebar {
-  width: 64px;
+  width: 72px;
   min-height: 100vh;
   background: #fff;
   border-right: 1px solid #ebebeb;
@@ -170,7 +170,16 @@ async function handleLogout() {
   text-decoration: none;
   white-space: nowrap;
   overflow: hidden;
-  justify-content: flex-start;
+  justify-content: center;  /* ← centers icon when collapsed */
+  min-height: 40px;
+}
+
+.sidebar:not(.sidebar--expanded) .sidebar-item {
+  padding: 10px 6px;
+}
+
+.sidebar--expanded .sidebar-item {
+  justify-content: flex-start;  /* ← left-align when expanded */
 }
 
 .sidebar-item:hover { background: #f0effd; color: #534AB7; }
