@@ -3,21 +3,8 @@
 > A full-stack NFT minting and marketplace platform built on Cardano Preprod. Supports both custodial wallets (email login) and external wallets (Lace/CIP-30) with the same feature set.
 
 
-## 📸 Screenshots
 
-> Add the following screenshots to a `/docs/screenshots/` folder:
-> - `dashboard.png` — Main dashboard with NFT grid and balance
-> - `create-mint.png` — Single NFT upload form
-> - `batch-upload.png` — Batch mint preview screen
-> - `browse-mints.png` — Public marketplace grid
-> - `nft-detail.png` — NFT detail page with actions
-> - `activity.png` — Activity page with modals
-> - `settings.png` — Settings page
-> - `buy-success.png` — Purchase success modal
-
----
-
-## 🏗️ Architecture
+##  Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -77,7 +64,7 @@
 
 ---
 
-## 🔄 Transaction Flows
+##  Transaction Flows
 
 ### External Wallet — Single Mint
 ```
@@ -106,7 +93,7 @@ User → Action → Backend loads mnemonic from DB
 
 ---
 
-## 🪙 NFT Token Architecture (CIP-68)
+##  NFT Token Architecture (CIP-68)
 
 Every mint creates **3 tokens** under one policy:
 
@@ -132,7 +119,7 @@ Policy ID (unique per NFT / collection)
 
 ---
 
-## 🛒 Marketplace Architecture
+##  Marketplace Architecture
 
 ```
 LISTING:
@@ -152,7 +139,7 @@ Smart contracts built with **Aiken v1.1.19** (Plutus V3).
 
 ---
 
-## 🔐 Wallet Support
+##  Wallet Support
 
 | Feature | Custodial (Email) | External (Lace) |
 |---------|:-----------------:|:---------------:|
@@ -168,7 +155,7 @@ Smart contracts built with **Aiken v1.1.19** (Plutus V3).
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 ### Frontend
 | Technology | Purpose |
@@ -206,7 +193,7 @@ Smart contracts built with **Aiken v1.1.19** (Plutus V3).
 
 ---
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### Prerequisites
 - Go 1.22+
@@ -264,7 +251,7 @@ Open `http://localhost:5173`
 
 ---
 
-## 📡 Key API Endpoints
+##  Key API Endpoints
 
 ### Auth
 ```
@@ -321,7 +308,7 @@ GET  /api/certificate/:id        — Public NFT certificate (no auth)
 
 ---
 
-## 🗄️ Database Schema
+##  Database Schema
 
 ```sql
 users               — user_id, email, created_at
@@ -340,7 +327,7 @@ batch_items         — id, batch_id, nft_id, row_order, status
 
 ---
 
-## 🔑 Key Technical Decisions
+##  Key Technical Decisions
 
 ### Why CIP-68 not CIP-25?
 CIP-68 stores metadata on-chain in a Plutus datum. It's updatable (in theory), trustless, and is the emerging standard for serious NFT projects. CIP-25 only writes to transaction metadata — immutable and limited. We use **both**: CIP-68 for on-chain data, CIP-25 for wallet display compatibility.
@@ -359,7 +346,7 @@ Single NFT mints use a one-shot Plutus policy (parameterized by a UTxO). For bat
 
 ---
 
-## 📂 Project Structure
+##  Project Structure
 
 ```
 NFT_Minting_Platform/
@@ -402,7 +389,7 @@ NFT_Minting_Platform/
 
 ---
 
-## 🧪 Testing on Preprod
+##  Testing on Preprod
 
 Get test ADA from the [Cardano Preprod Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/).
 
@@ -412,7 +399,7 @@ For Lace wallet on Preprod:
 
 ---
 
-## 📝 Known Limitations
+##  Known Limitations
 
 - **Mainnet not configured** — currently Preprod only. Switching requires updating Blockfrost project ID and network IDs in the sidecar.
 - **Lace image display delay** — New NFT images appear in Lace 30–60 minutes after minting (Preprod indexing delay).
@@ -421,7 +408,7 @@ For Lace wallet on Preprod:
 
 ---
 
-## 👨‍💻 Built By
+##  Built By
 
 Yadurshan Rajakumar — [github.com/Yadurshan-R](https://github.com/Yadurshan-R)
 
