@@ -274,12 +274,12 @@ func (h *Handler) MintNFT(c *gin.Context) {
 		return
 	}
 
-	var assetName, metadataIPFS, imageIPFS string
+	var assetName, metadataIPFS, imageIPFS, description string
 	var royalties float64
 	err := h.service.db.QueryRow(c.Request.Context(), `
-        SELECT asset_name, metadata_ipfs, image_ipfs, royalties
+        SELECT asset_name, metadata_ipfs, image_ipfs, royalties, description
         FROM nfts WHERE id = $1 AND owner_id = $2
-    `, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties)
+    `, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties, &description)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found"})
 		return
@@ -298,6 +298,7 @@ func (h *Handler) MintNFT(c *gin.Context) {
 		MetadataIPFS: metadataIPFS,
 		ImageIPFS:    imageIPFS,
 		Royalties:    royalties,
+		Description:  description,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mint: " + err.Error()})
@@ -744,12 +745,12 @@ func (h *Handler) MintNFTUnsigned(c *gin.Context) {
 	}
 
 	// Verify NFT belongs to this user and is pending
-	var assetName, metadataIPFS, imageIPFS string
+	var assetName, metadataIPFS, imageIPFS, description string
 	var royalties float64
 	err := h.service.db.QueryRow(c.Request.Context(), `
-		SELECT asset_name, metadata_ipfs, image_ipfs, royalties
+		SELECT asset_name, metadata_ipfs, image_ipfs, royalties, description
 		FROM nfts WHERE id = $1 AND owner_id = $2 AND status = 'pending'
-	`, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties)
+	`, body.NFTID, userID).Scan(&assetName, &metadataIPFS, &imageIPFS, &royalties, &description)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "NFT not found or not pending"})
 		return
@@ -774,6 +775,7 @@ func (h *Handler) MintNFTUnsigned(c *gin.Context) {
 		MetadataIPFS:  metadataIPFS,
 		ImageIPFS:     imageIPFS,
 		Royalties:     royalties,
+		Description:   description,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build mint tx: " + err.Error()})

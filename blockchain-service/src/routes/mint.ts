@@ -7,6 +7,7 @@ import {
   applyCborEncoding,
   mConStr0,
   mConStr1,
+  metadataToCip68,
   serializeData,
   serializePlutusScript,
   stringToHex,
@@ -91,7 +92,7 @@ function parseCip30Utxos(cborUtxos: string[]): any[] {
 
 router.post("/single", async (req: Request, res: Response) => {
   try {
-    const { mnemonic, asset_name, metadata_ipfs, image_ipfs, royalties = 0 } = req.body;
+    const { mnemonic, asset_name, metadata_ipfs, image_ipfs, royalties = 0, description = "" } = req.body;
 
     if (!mnemonic || !asset_name || !metadata_ipfs) {
       res.status(400).json({ error: "mnemonic, asset_name and metadata_ipfs are required" });
@@ -154,16 +155,13 @@ router.post("/single", async (req: Request, res: Response) => {
 
     const creatorAddress = await wallet.getChangeAddress();
 
-    const cip68Datum = mConStr0([
-      [
-        [stringToHex("name"),        stringToHex(asset_name)],
-        [stringToHex("image"),       stringToHex(image_ipfs)],
-        [stringToHex("mediaType"),   stringToHex("image/png")],
-        [stringToHex("description"), stringToHex("")],
-        [stringToHex("files"),       []],
-      ],
-      1,
-    ]);
+    const cip68Datum    = metadataToCip68({
+      name:        asset_name,
+      image:       image_ipfs,
+      mediaType:   "image/png",
+      description: description || "",
+      files:       [],
+    });
     const cip68DatumCbor = serializeData(cip68Datum);
 
     const royaltyRate = Math.floor((royalties / 100) * 1_000_000);
@@ -208,7 +206,7 @@ router.post("/single", async (req: Request, res: Response) => {
             name:        asset_name,
             image:       image_ipfs,
             mediaType:   "image/png",
-            description: "",
+            description: description || "",
           }
         }
       })
@@ -237,7 +235,7 @@ router.post("/single", async (req: Request, res: Response) => {
 
 router.post("/single-unsigned", async (req: Request, res: Response) => {
   try {
-    const { wallet_address, wallet_utxos, asset_name, metadata_ipfs, image_ipfs, royalties = 0 } = req.body;
+    const { wallet_address, wallet_utxos, asset_name, metadata_ipfs, image_ipfs, royalties = 0, description = "" } = req.body;
 
     if (!wallet_address || !asset_name || !metadata_ipfs) {
       res.status(400).json({ error: "wallet_address, asset_name and metadata_ipfs are required" });
@@ -293,16 +291,14 @@ router.post("/single-unsigned", async (req: Request, res: Response) => {
     const royaltyTokenName = "001f4d70" + assetNameHex;
 
     const royaltyRate = Math.floor((royalties / 100) * 1_000_000);
-    const cip68Datum = mConStr0([
-      [
-        [stringToHex("name"),        stringToHex(asset_name)],
-        [stringToHex("image"),       stringToHex(image_ipfs)],
-        [stringToHex("mediaType"),   stringToHex("image/png")],
-        [stringToHex("description"), stringToHex("")],
-        [stringToHex("files"),       []],
-      ],
-      1,
-    ]);
+    
+    const cip68Datum    = metadataToCip68({
+      name:        asset_name,
+      image:       image_ipfs,
+      mediaType:   "image/png",
+      description: description || "",
+      files:       [],
+    });
     const cip68DatumCbor = serializeData(cip68Datum);
 
     const royaltyDatum = mConStr0([
@@ -346,7 +342,7 @@ router.post("/single-unsigned", async (req: Request, res: Response) => {
             name:        asset_name,
             image:       image_ipfs,
             mediaType:   "image/png",
-            description: "",
+            description: description || "",
           }
         }
       })

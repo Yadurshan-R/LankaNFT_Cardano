@@ -23,7 +23,7 @@
       </div>
       <h2 class="success-title">Batch Complete!</h2>
       <p class="success-desc">
-        <strong>{{ batch.progress.minted }}</strong> NFTs minted successfully on Cardano Preprod.
+        <strong>{{ auth.walletType === 'external' ? mintedCount : batch.progress.minted }}</strong> NFTs minted successfully on Cardano Preprod.
         <span v-if="batch.progress.failed > 0" class="failed-note">
           · {{ batch.progress.failed }} failed.
         </span>
@@ -237,6 +237,7 @@ const privacy        = ref<'public' | 'private'>('public')
 const rows           = ref<BatchRow[]>([])
 const uploadStatuses = ref<string[]>([])
 const mintedTxHash   = ref('')
+const mintedCount    = ref(0)
 
 // Background preparation state — hidden from user but drives the UI indicators
 const isPreparing  = ref(false)
@@ -361,6 +362,7 @@ async function handleMint() {
         tokens:    tokens,
       })
 
+      mintedCount.value = tokens.length
       mintedTxHash.value = txHash
       currentStep.value  = 3
 

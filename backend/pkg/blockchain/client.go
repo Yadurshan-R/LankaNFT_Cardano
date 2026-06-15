@@ -38,6 +38,7 @@ type MintNFTRequest struct {
 	MetadataIPFS string   `json:"metadata_ipfs"`
 	ImageIPFS    string   `json:"image_ipfs"`
 	Royalties    float64  `json:"royalties"`
+	Description  string   `json:"description"`
 }
 
 type MintNFTResponse struct {
@@ -68,6 +69,7 @@ type BatchMintItem struct {
 	MetadataIPFS string  `json:"metadata_ipfs"`
 	ImageIPFS    string  `json:"image_ipfs"`
 	Royalties    float64 `json:"royalties"`
+	Description  string  `json:"description"`
 }
 
 type BatchMintRequest struct {
@@ -256,6 +258,7 @@ type MintNFTUnsignedRequest struct {
 	MetadataIPFS  string   `json:"metadata_ipfs"`
 	ImageIPFS     string   `json:"image_ipfs"`
 	Royalties     float64  `json:"royalties"`
+	Description   string   `json:"description"`
 }
 
 // MintNFTUnsignedResponse contains the unsigned CBOR + policy info.
