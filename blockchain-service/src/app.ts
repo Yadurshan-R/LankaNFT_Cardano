@@ -110,7 +110,18 @@ app.post("/api/submit", async (req, res) => {
     const unsignedTx = CSL.Transaction.from_hex(unsigned_cbor);
 
     // Parse the witness set returned by Lace's signTx()
-    const witnessSet = CSL.TransactionWitnessSet.from_hex(witness_cbor);
+    const laceWitnesses = CSL.TransactionWitnessSet.from_hex(witness_cbor);
+
+    // Keep the scripts, redeemers and datums MeshSDK put in the unsigned tx,
+    // and only ADD Lace's signatures. Replacing the whole witness set drops the
+    // minting script -> MissingScriptWitnesses / ScriptIntegrityHashMismatch.
+    const witnessSet = unsignedTx.witness_set();
+    const vkeys = witnessSet.vkeys() ?? CSL.Vkeywitnesses.new();
+    const laceVkeys = laceWitnesses.vkeys();
+    if (laceVkeys) {
+      for (let i = 0; i < laceVkeys.len(); i++) vkeys.add(laceVkeys.get(i));
+    }
+    witnessSet.set_vkeys(vkeys);
 
     // Assemble the full signed transaction:
     //   transaction = [body, witness_set, is_valid, auxiliary_data]

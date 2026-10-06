@@ -19,6 +19,7 @@
 package auth
 
 import (
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -103,11 +104,13 @@ func (h *Handler) RequestOTP(c *gin.Context) {
 
 	code, err := h.service.GenerateOTP(c.Request.Context(), body.Email)
 	if err != nil {
+		log.Printf("[OTP] generate failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate OTP"})
 		return
 	}
 
 	if err := email.SendOTP(body.Email, code); err != nil {
+		log.Printf("[OTP] email failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send OTP email"})
 		return
 	}

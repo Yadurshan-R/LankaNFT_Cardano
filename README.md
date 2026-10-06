@@ -2,7 +2,43 @@
 
 > A full-stack NFT minting and marketplace platform built on Cardano Preprod. Supports both custodial wallets (email login) and external wallets (Lace/CIP-30) with the same feature set.
 
+---
 
+##  Screenshots
+
+### Sign in & dashboard
+| Login (email OTP or Lace) | Dashboard |
+|:---:|:---:|
+| ![Login](screenshots/Login.png) | ![Dashboard](screenshots/Dashboard.png) |
+
+### Single mint
+| Mint form | Mint completed |
+|:---:|:---:|
+| ![Single mint form](screenshots/Single_Upload_Form.png) | ![Single mint completed](screenshots/Single_Upload_Completed.png) |
+
+### Batch mint (CSV)
+| Batch form | Minting in progress | Batch completed |
+|:---:|:---:|:---:|
+| ![Batch form](screenshots/Batch_upload_form.png) | ![Batch in progress](screenshots/BatchUploadProcess.png) | ![Batch completed](screenshots/BatchUploadComplete.png) |
+
+### Marketplace
+| Browse listings | Marketplace |
+|:---:|:---:|
+| ![Browse tokens](screenshots/Browse_Token.png) | ![Marketplace](screenshots/MarketPlace.png) |
+
+### NFT details, activity & certificate
+| NFT detail | Activity | Public certificate |
+|:---:|:---:|:---:|
+| ![NFT detail](screenshots/NFT_Detail_Page.png) | ![Activity](screenshots/ActivityPage.png) | ![Certificate](screenshots/Certificate.png) |
+
+### On-chain proof (Cardanoscan, Preprod)
+Every mint, listing and sale is a real Cardano transaction that anyone can verify.
+
+| Purchase transaction | Minted CIP-68 asset |
+|:---:|:---:|
+| ![Transaction on Cardanoscan](screenshots/CardanoSCanTransactionPage.png) | ![Asset on Cardanoscan](screenshots/CardanoScanAssetPage.png) |
+
+---
 
 ##  Architecture
 
@@ -170,10 +206,10 @@ Smart contracts built with **Aiken v1.1.19** (Plutus V3).
 ### Backend
 | Technology | Purpose |
 |-----------|---------|
-| Go 1.22 + Gin | REST API server |
+| Go 1.25 + Gin | REST API server |
 | pgx v5 | PostgreSQL driver |
 | JWT | Session authentication |
-| SMTP (Gmail) | OTP email delivery |
+| SMTP (Gmail app password) | OTP email delivery |
 
 ### Blockchain Sidecar
 | Technology | Purpose |
@@ -196,52 +232,75 @@ Smart contracts built with **Aiken v1.1.19** (Plutus V3).
 ##  Getting Started
 
 ### Prerequisites
-- Go 1.22+
+- Go 1.25+
 - Node.js 18+
 - PostgreSQL 15+
-- Blockfrost Preprod API key
-- Pinata API key
+- [Blockfrost](https://blockfrost.io) Preprod project ID (free)
+- [Pinata](https://pinata.cloud) API key + secret (free tier)
+- A Gmail account with an [app password](https://myaccount.google.com/apppasswords) for sending OTP emails
+- [Lace](https://www.lace.io) wallet extension switched to **Preprod** (for the external-wallet flow)
 
-### Environment Variables
-
-**Backend** (`backend/.env`):
-```env
-DB_URL=postgres://user:password@localhost:5432/midnight_nft
-JWT_SECRET=your_jwt_secret
-BLOCKFROST_PROJECT_ID=preprod...
-BLOCKFROST_BASE_URL=https://cardano-preprod.blockfrost.io/api/v0
-BLOCKCHAIN_SERVICE_URL=http://localhost:3001
-BLOCKCHAIN_SERVICE_SECRET=your_shared_secret
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your@gmail.com
-SMTP_PASSWORD=your_app_password
-TREASURY_ADDRESS=addr_test1...
-```
-
-**Blockchain Sidecar** (`blockchain-service/.env`):
-```env
-BLOCKFROST_PROJECT_ID=preprod...
-BLOCKCHAIN_SERVICE_SECRET=your_shared_secret
-```
-
-### Running Locally
+### 1. Clone
 
 ```bash
-# 1. Database
-createdb midnight_nft
-psql midnight_nft < backend/schema.sql
+git clone https://github.com/Yadurshan-R/LankaNFT_Cardano.git
+cd LankaNFT_Cardano
+```
 
-# 2. Backend
+### 2. Database
+
+```bash
+createdb midnight_nft
+for f in backend/migrations/0*.sql; do psql midnight_nft -f "$f"; done
+```
+
+### 3. Environment variables
+
+**Backend** (`backend/.env`, start from `backend/.env.example`):
+```env
+PORT=8080
+DB_URL=postgres://postgres:YOUR_PASSWORD@localhost:5432/midnight_nft?sslmode=disable
+JWT_SECRET=any_long_random_string
+AES_MASTER_KEY=64_hex_chars          # generate: openssl rand -hex 32
+BLOCKFROST_PROJECT_ID=preprod...
+BLOCKFROST_BASE_URL=https://cardano-preprod.blockfrost.io/api/v0
+PINATA_API_KEY=...
+PINATA_SECRET_KEY=...
+GMAIL_USER=your@gmail.com
+GMAIL_APP_PASSWORD=your_16_char_app_password
+OTP_EXPIRY_MINUTES=10
+COOKIE_DOMAIN=localhost
+BLOCKCHAIN_SERVICE_URL=http://localhost:3001
+BLOCKCHAIN_SERVICE_SECRET=any_shared_secret
+```
+
+**Blockchain sidecar** (`blockchain-service/.env`):
+```env
+PORT=3001
+BLOCKFROST_PROJECT_ID=preprod...
+SHARED_SECRET=any_shared_secret
+```
+
+**Frontend** (`frontend/.env`):
+```env
+VITE_API_BASE_URL=http://localhost:8080
+```
+
+> `BLOCKCHAIN_SERVICE_SECRET` (backend) and `SHARED_SECRET` (sidecar) must be the same value.
+
+### 4. Run (three terminals)
+
+```bash
+# Terminal 1 — Backend (port 8080)
 cd backend
 go run cmd/api/main.go
 
-# 3. Blockchain Sidecar
+# Terminal 2 — Blockchain sidecar (port 3001)
 cd blockchain-service
 npm install
 npm run dev
 
-# 4. Frontend
+# Terminal 3 — Frontend (port 5173)
 cd frontend
 npm install
 npm run dev
@@ -349,9 +408,10 @@ Single NFT mints use a one-shot Plutus policy (parameterized by a UTxO). For bat
 ##  Project Structure
 
 ```
-NFT_Minting_Platform/
+LankaNFT_Cardano/
 ├── backend/                    # Go REST API
 │   ├── cmd/api/main.go         # Entry point, route registration
+│   ├── migrations/             # PostgreSQL schema (run in order)
 │   ├── internal/
 │   │   ├── auth/               # OTP + wallet auth handlers
 │   │   ├── nft/                # NFT mint/transfer handlers
@@ -362,13 +422,13 @@ NFT_Minting_Platform/
 ├── blockchain-service/         # Node.js blockchain sidecar
 │   └── src/
 │       ├── app.ts              # Express server + /api/submit (CSL)
-│       ├── config.ts           # Environment config
+│       ├── config/index.ts     # Environment config
+│       ├── wallet.ts           # Wallet generation
 │       └── routes/
 │           ├── mint.ts         # Single mint (signed + unsigned)
 │           ├── batch.ts        # Batch mint (signed + unsigned)
 │           ├── marketplace.ts  # List/Buy/Cancel (signed + unsigned)
-│           ├── transfer.ts     # Transfer (signed + unsigned)
-│           └── wallet.ts       # Wallet generation
+│           └── transfer.ts     # Transfer (signed + unsigned)
 │
 ├── frontend/                   # Vue 3 frontend
 │   └── src/
@@ -381,9 +441,11 @@ NFT_Minting_Platform/
 │       ├── composables/        # useWalletSession (CIP-30)
 │       └── utils/cardano.ts    # Cardanoscan URL builder (hex encoding)
 │
-├── contracts/                  # Aiken smart contracts
+├── contracts/midnight-nft/     # Aiken smart contracts
+│   ├── validators/             # minting_policy, marketplace, royalty_lock, reference_lock
 │   └── plutus.json             # Compiled validator scripts
 │
+├── screenshots/                # Images used in this README
 └── README.md
 ```
 

@@ -28,17 +28,26 @@ export function toOnChainHex(tokenName: string): string {
   const prefix = tokenName.slice(0, 8) // CIP-68 label: "001bc280", "000643b0" etc.
   const rest   = tokenName.slice(8)    // the asset name part
 
-  // If rest contains any non-hex character (g-z, uppercase non-hex, etc.)
-  // it's a raw name that needs to be hex-encoded
-  if (/[^0-9a-fA-F]/.test(rest)) {
-    const hexEncoded = Array.from(rest)
-      .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
-      .join('')
-    return prefix + hexEncoded
-  }
+  // Treat it as already hex-encoded only if it is even-length hex that
+  // decodes to readable text. Names like "aa", "cafe" or "123" look like hex
+  // but are raw names, so they must still be encoded.
+  if (isEncodedName(rest)) return tokenName
 
-  // Already hex-encoded (from Blockfrost or already converted)
-  return tokenName
+  const hexEncoded = Array.from(new TextEncoder().encode(rest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+  return prefix + hexEncoded
+}
+
+function isEncodedName(rest: string): boolean {
+  if (rest.length === 0 || rest.length % 2 !== 0 || /[^0-9a-fA-F]/.test(rest)) return false
+  const bytes = new Uint8Array(rest.match(/../g)!.map(h => parseInt(h, 16)))
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return /^[^\u0000-\u001f\u007f]+$/.test(text)
+  } catch {
+    return false
+  }
 }
 
 /**

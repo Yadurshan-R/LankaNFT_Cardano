@@ -112,6 +112,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // The login cookie is shared by all tabs, so another tab may have switched
+  // accounts (email <-> Lace) since this page loaded. Re-check whenever the
+  // tab becomes visible again so walletType never goes stale.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && checked.value) checkAuth()
+    })
+  }
+
   // Logout — clears JWT cookie server-side and resets all local state
   async function logout() {
     try {

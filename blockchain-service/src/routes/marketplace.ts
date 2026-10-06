@@ -147,18 +147,78 @@ async function fetchListingUtxoWithRetry(
   return null;
 }
 
+
+/**
+ * Reads the seller's address straight from the listing datum on-chain.
+ * The marketplace contract pays exactly this address, so using it avoids
+ * mismatches when the DB address has a staking part and the datum does not.
+ */
+function sellerAddressFromDatum(listingUtxo: any, fallback: string): string {
+  try {
+    const CSL = require("@emurgo/cardano-serialization-lib-nodejs");
+    const cbor = listingUtxo?.output?.plutusData;
+    if (!cbor) return fallback;
+    const fields = CSL.PlutusData.from_hex(cbor).as_constr_plutus_data().data();
+    const addr = fields.get(1).as_constr_plutus_data().data();
+    const payC = addr.get(0).as_constr_plutus_data();
+    const payHash = payC.data().get(0).as_bytes();
+    const pay = payC.alternative().to_str() === "0"
+      ? CSL.Credential.from_keyhash(CSL.Ed25519KeyHash.from_bytes(payHash))
+      : CSL.Credential.from_scripthash(CSL.ScriptHash.from_bytes(payHash));
+    const stakeOpt = addr.get(1).as_constr_plutus_data();
+    if (stakeOpt.alternative().to_str() !== "0") {
+      return CSL.EnterpriseAddress.new(0, pay).to_address().to_bech32("addr_test");
+    }
+    const inline = stakeOpt.data().get(0).as_constr_plutus_data();
+    const stakeC = inline.data().get(0).as_constr_plutus_data();
+    const stakeHash = stakeC.data().get(0).as_bytes();
+    const stake = stakeC.alternative().to_str() === "0"
+      ? CSL.Credential.from_keyhash(CSL.Ed25519KeyHash.from_bytes(stakeHash))
+      : CSL.Credential.from_scripthash(CSL.ScriptHash.from_bytes(stakeHash));
+    return CSL.BaseAddress.new(0, pay, stake).to_address().to_bech32("addr_test");
+  } catch (e) {
+    console.error("[MARKETPLACE] could not read seller from datum, using DB address:", e);
+    return fallback;
+  }
+}
+
 /**
  * Finds a suitable collateral UTxO from the wallet.
  * Cardano requires a pure-ADA UTxO (no tokens) of at least 5 ADA
  * as collateral when executing Plutus scripts.
  */
 function findCollateralUtxo(utxos: any[]): any | null {
-  return utxos.find(
+  // Pick the SMALLEST pure-ADA UTxO >= 5 ADA, so a big faucet UTxO
+  // stays available for paying the price and fees.
+  const candidates = utxos
+    .filter(
+      (u) =>
+        u.output.amount.length === 1 &&
+        u.output.amount[0].unit === "lovelace" &&
+        parseInt(u.output.amount[0].quantity) >= COLLATERAL_MIN_LOVELACE
+    )
+    .sort(
+      (a, b) =>
+        parseInt(a.output.amount[0].quantity) - parseInt(b.output.amount[0].quantity)
+    );
+  return candidates[0] ?? null;
+}
+
+/**
+ * UTxOs that may pay for the tx. The collateral is kept out of coin selection
+ * only when the rest of the wallet can cover it; if the wallet has a single
+ * ADA UTxO it is allowed to be both collateral and input (valid on Cardano).
+ */
+function spendableUtxos(utxos: any[], collateralUtxo: any): any[] {
+  const others = utxos.filter(
     (u) =>
-      u.output.amount.length === 1 &&
-      u.output.amount[0].unit === "lovelace" &&
-      parseInt(u.output.amount[0].quantity) >= COLLATERAL_MIN_LOVELACE
-  ) ?? null;
+      u.input.txHash !== collateralUtxo.input.txHash ||
+      u.input.outputIndex !== collateralUtxo.input.outputIndex
+  );
+  const lovelace = (u: any) =>
+    parseInt(u.output.amount.find((a: any) => a.unit === "lovelace")?.quantity ?? "0");
+  const othersTotal = others.reduce((sum, u) => sum + lovelace(u), 0);
+  return othersTotal >= lovelace(collateralUtxo) ? others : utxos;
 }
 
 // ─── POST /list ───────────────────────────────────────────────────────────────
@@ -345,7 +405,7 @@ router.post("/buy", async (req: Request, res: Response) => {
       )
       .requiredSignerHash(resolvePaymentKeyHash(buyerAddress))
       .txOut(buyerAddress, [{ unit: nft_unit, quantity: "1" }])
-      .txOut(seller_address, [{ unit: "lovelace", quantity: sellerAmount.toString() }])
+      .txOut(sellerAddressFromDatum(listingUtxo, seller_address), [{ unit: "lovelace", quantity: sellerAmount.toString() }])
       // Explicitly recreate a 5 ADA collateral UTxO for the buyer's next purchase
       .txOut(buyerAddress, [{ unit: "lovelace", quantity: "5000000" }]);
 
@@ -363,11 +423,7 @@ router.post("/buy", async (req: Request, res: Response) => {
     const unsignedTx = await txBuilder
       .changeAddress(buyerAddress)
       .selectUtxosFrom(
-        utxos.filter(
-          (u) =>
-            u.input.txHash !== collateralUtxo.input.txHash ||
-            u.input.outputIndex !== collateralUtxo.input.outputIndex
-        )
+        spendableUtxos(utxos, collateralUtxo)
       )
       .complete();
 
@@ -469,11 +525,7 @@ router.post("/cancel", async (req: Request, res: Response) => {
       .txOut(sellerAddress, [{ unit: nft_unit, quantity: "1" }])
       .changeAddress(sellerAddress)
       .selectUtxosFrom(
-        utxos.filter(
-          (u) =>
-            u.input.txHash !== collateralUtxo.input.txHash ||
-            u.input.outputIndex !== collateralUtxo.input.outputIndex
-        )
+        spendableUtxos(utxos, collateralUtxo)
       )
       .requiredSignerHash(resolvePaymentKeyHash(sellerAddress))
       .complete();
@@ -605,7 +657,7 @@ router.post("/buy-unsigned", async (req: Request, res: Response) => {
       )
       .requiredSignerHash(resolvePaymentKeyHash(buyerAddress))
       .txOut(buyerAddress, [{ unit: nft_unit, quantity: "1" }])
-      .txOut(seller_address, [{ unit: "lovelace", quantity: sellerAmount.toString() }])
+      .txOut(sellerAddressFromDatum(listingUtxo, seller_address), [{ unit: "lovelace", quantity: sellerAmount.toString() }])
       .txOut(buyerAddress, [{ unit: "lovelace", quantity: "5000000" }]);
 
     if (royalty_amount > 0 && royalty_address) {
@@ -620,11 +672,7 @@ router.post("/buy-unsigned", async (req: Request, res: Response) => {
     const unsignedTx = await txBuilder
       .changeAddress(buyerAddress)
       .selectUtxosFrom(
-        utxos.filter(
-          (u) =>
-            u.input.txHash !== collateralUtxo.input.txHash ||
-            u.input.outputIndex !== collateralUtxo.input.outputIndex
-        )
+        spendableUtxos(utxos, collateralUtxo)
       )
       .complete();
 
@@ -690,11 +738,7 @@ router.post("/cancel-unsigned", async (req: Request, res: Response) => {
       .txOut(wallet_address, [{ unit: nft_unit, quantity: "1" }])
       .changeAddress(wallet_address)
       .selectUtxosFrom(
-        utxos.filter(
-          (u) =>
-            u.input.txHash !== collateralUtxo.input.txHash ||
-            u.input.outputIndex !== collateralUtxo.input.outputIndex
-        )
+        spendableUtxos(utxos, collateralUtxo)
       )
       .requiredSignerHash(resolvePaymentKeyHash(wallet_address))
       .complete();

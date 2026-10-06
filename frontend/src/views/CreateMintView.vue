@@ -235,6 +235,9 @@ async function handleMint() {
   const prepared = await nftStore.prepare(formData)
   if (!prepared) return
 
+  // Re-read who is logged in right before minting, in case the account changed
+  await auth.checkAuth()
+
   if (auth.walletType === 'external') {
     try {
       nftStore.isLoading = true

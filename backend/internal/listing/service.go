@@ -56,6 +56,22 @@ func (s *Service) GetWalletForUser(ctx context.Context, userID string) ([]string
 	return words, walletAddress, nil
 }
 
+// GetAddressForUser returns a user's wallet address, whether they log in
+// by email (custodial wallet) or with Lace (external wallet).
+func (s *Service) GetAddressForUser(ctx context.Context, userID string) (string, error) {
+	var addr string
+	err := s.db.QueryRow(ctx, `
+		SELECT wallet_address FROM custodial_wallets WHERE user_id = $1
+		UNION ALL
+		SELECT wallet_address FROM external_wallets WHERE user_id = $1
+		LIMIT 1
+	`, userID).Scan(&addr)
+	if err != nil {
+		return "", fmt.Errorf("no wallet found for user: %w", err)
+	}
+	return addr, nil
+}
+
 // CreateListing stores a new listing in the DB after on-chain confirmation.
 func (s *Service) CreateListing(
 	ctx context.Context,

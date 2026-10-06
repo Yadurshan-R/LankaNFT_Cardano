@@ -548,7 +548,8 @@ func (h *Handler) GetCertificate(c *gin.Context) {
 	cardanoscanAsset := ""
 	if txHash != "" {
 		cardanoscanTx = fmt.Sprintf("https://preprod.cardanoscan.io/transaction/%s", txHash)
-		cardanoscanAsset = fmt.Sprintf("https://preprod.cardanoscan.io/token/%s%s", policyID, assetName)
+		// asset_name is the raw base name; the user token on-chain is "001bc280" + hex(name)
+		cardanoscanAsset = "https://preprod.cardanoscan.io/token/" + buildNFTUnit(policyID, "001bc280"+assetName)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

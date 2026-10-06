@@ -137,6 +137,7 @@ func (h *Handler) CreateListing(c *gin.Context) {
 
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
+		log.Printf("[LISTING] wallet load failed for %s: %v", userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
 		return
 	}
@@ -227,13 +228,15 @@ func (h *Handler) BuyListing(c *gin.Context) {
 	// Load buyer's custodial wallet
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
+		log.Printf("[LISTING] wallet load failed for %s: %v", userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
 		return
 	}
 
 	// Get seller's wallet address for the ADA payment output
-	_, sellerAddress, err := h.service.GetWalletForUser(c.Request.Context(), sellerID)
+	sellerAddress, err := h.service.GetAddressForUser(c.Request.Context(), sellerID)
 	if err != nil {
+		log.Printf("[LISTING] seller address lookup failed for %s: %v", sellerID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get seller address"})
 		return
 	}
@@ -316,6 +319,7 @@ func (h *Handler) CancelListing(c *gin.Context) {
 	// Load seller's custodial wallet for signing the cancel transaction
 	mnemonic, _, err := h.service.GetWalletForUser(c.Request.Context(), userID)
 	if err != nil {
+		log.Printf("[LISTING] wallet load failed for %s: %v", userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load wallet"})
 		return
 	}
@@ -575,10 +579,11 @@ func (h *Handler) BuyListingUnsigned(c *gin.Context) {
 	var listingSellerID, scriptUTxO, sellerAddress, nftPolicyID, nftAssetName, royaltyPolicyID string
 	var priceLovelace int64
 	err := h.service.db.QueryRow(c.Request.Context(), `
-		SELECT l.seller_id, l.script_utxo, cw.wallet_address,
+		SELECT l.seller_id, l.script_utxo, COALESCE(cw.wallet_address, ew.wallet_address),
 		       l.price_lovelace, l.nft_policy_id, l.nft_asset_name, l.royalty_policy_id
 		FROM listings l
-		JOIN custodial_wallets cw ON cw.user_id = l.seller_id
+		LEFT JOIN custodial_wallets cw ON cw.user_id = l.seller_id
+		LEFT JOIN external_wallets ew ON ew.user_id = l.seller_id
 		WHERE l.id = $1 AND l.status = 'active'
 	`, body.ListingID).Scan(
 		&listingSellerID, &scriptUTxO, &sellerAddress,
